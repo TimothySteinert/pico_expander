@@ -1,0 +1,42 @@
+arm:
+  name: "Arm Alarm"
+  description: "Arm Alarmo via HexaOne keypad bridge"
+  fields:
+    entity_id:
+      required: true
+      example: "alarm_control_panel.alarmo"
+      selector: { entity: { domain: "alarm_control_panel" } }
+    code:
+      required: false
+      example: "1234"
+      selector: { text: {} }
+    mode:
+      required: true
+      example: "away"
+      selector:
+        select:
+          options:
+            - away
+            - home
+            - night
+            - vacation
+            - custom
+    skip_delay:
+      required: false
+      example: true
+      selector: { boolean: {} }
+    force:
+      required: false
+      example: true
+      selector: { boolean: {} }
+
+disarm:
+  name: "Disarm Alarm"
+  description: "Disarm Alarmo via HexaOne keypad bridge"
+  fields:
+    entity_id:
+      required: true
+      selector: { entity: { domain: "alarm_control_panel" } }
+    code:
+      required: false
+      selector: { text: {} }
