@@ -1,0 +1,10 @@
+{
+  "domain": "hexaone_alarm_bridge",
+  "name": "HexaOne Alarm Bridge",
+  "version": "0.1.0",
+  "documentation": "https://github.com/your-repo/hexaone_alarm_bridge",
+  "requirements": [],
+  "dependencies": ["alarmo"],
+  "codeowners": ["@yourgithub"],
+  "config_flow": true
+}
