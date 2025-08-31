@@ -13,7 +13,7 @@ pico_expander_ns = cg.esphome_ns.namespace("pico_expander")
 PicoExpanderComponent = pico_expander_ns.class_(
     "PicoExpanderComponent", cg.Component, i2c.I2CDevice
 )
-PicoExpanderOutput = pico_expander_ns.class_("PicoExpanderOutput", output.Output)
+PicoExpanderOutput = pico_expander_ns.class_("PicoExpanderOutput", output.FloatOutput)
 
 CONFIG_SCHEMA = (
     cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoExpanderComponent)})
