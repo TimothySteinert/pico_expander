@@ -12,7 +12,7 @@ CONFIG_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
         cv.GenerateID(CONF_ID): cv.declare_id(PicoExpanderOutput),
         cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
-        cv.Required(CONF_NUMBER): cv.int_range(min=0, max=2),
+        cv.Required(CONF_NUMBER): cv.int_range(min=0x30, max=0x3E),
     }
 )
 
