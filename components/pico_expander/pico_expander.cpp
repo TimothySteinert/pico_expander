@@ -1,7 +1,7 @@
 #include "pico_expander.h"
 #include "esphome/core/log.h"
 
-namespace esphhome {  // <-- typo would break; ensure "esphome" not "esphhome"
+namespace esphome {
 namespace pico_expander {
 
 static const char *const TAG = "pico_expander";
@@ -20,7 +20,7 @@ void PicoExpanderComponent::dump_config() {
 
 void PicoExpanderComponent::write_value(uint8_t channel, uint8_t value) {
   if (channel > 2) return;
-  const uint8_t reg = channel;  // 0=R,1=G,2=B
+  const uint8_t reg = channel;
   if (this->write_register(reg, &value, 1) != i2c::ERROR_OK) {
     this->status_set_warning();
     ESP_LOGW(TAG, "I2C write failed (reg=%u, val=0x%02X)", reg, value);
