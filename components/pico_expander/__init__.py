@@ -53,7 +53,9 @@ async def pico_expander_output_to_code(config):
     await output.register_output(var, config)
 
 
-# Register the platform explicitly (new style)
-output.register_output_platform(
+# ---------------------------------------------------------------------------
+# Register the output platform explicitly (ESPHome 2025.7+)
+# ---------------------------------------------------------------------------
+output.setup_output_platform_(
     "pico_expander", PicoExpanderOutput, pico_expander_output_to_code
 )
