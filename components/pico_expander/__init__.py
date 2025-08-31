@@ -33,7 +33,7 @@ async def to_code(config):
 
 # ---------------------------------------------------------------------------
 # Output schema (for each RGB channel)
-# - FloatOutput handles min_power/max_power/zero_means_zero/inverted/etc.
+# FloatOutput handles min_power/max_power/zero_means_zero/inverted/etc.
 # ---------------------------------------------------------------------------
 OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
@@ -51,8 +51,7 @@ async def pico_expander_output_to_code(config):
     # Registers min/max/zero_means_zero/inverted/power_supply bindings, etc.
     await output.register_output(var, config)
 
-# ESPHome 2025.7+ registration API
-# (If your environment changes later, the loader error will tell the right symbol.)
-output.setup_output_platform_(
-    "pico_expander", PicoExpanderOutput, pico_expander_output_to_code
-)
+# ---------------------------------------------------------------------------
+# ESPHome 2025.7.x: register platform with (name, to_code)
+# ---------------------------------------------------------------------------
+output.setup_output_platform_("pico_expander", pico_expander_output_to_code)
