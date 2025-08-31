@@ -7,7 +7,7 @@
 namespace esphome {
 namespace pico_expander {
 
-/** Hub device exposing 3 8-bit I²C registers (0=R, 1=G, 2=B). */
+/** Hub: I²C device exposing 3 8-bit registers: 0=R, 1=G, 2=B. */
 class PicoExpanderComponent : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
@@ -17,14 +17,14 @@ class PicoExpanderComponent : public Component, public i2c::I2CDevice {
   void write_value(uint8_t channel, uint8_t value);
 };
 
-/** Single FloatOutput channel mapping 0.0–1.0 to 0x00–0xFF and writing one byte */
+/** Output: maps 0.0–1.0 float → 0x00–0xFF, writes one byte to register. */
 class PicoExpanderOutput : public output::FloatOutput {
  public:
   void set_parent(PicoExpanderComponent *parent) { parent_ = parent; }
   void set_channel(uint8_t channel) { channel_ = channel; }
 
  protected:
-  // FloatOutput already applied min/max/inversion/zero_means_zero
+  // Called after ESPHome already applied min_power/max_power/inverted/zero_means_zero
   void write_state(float state) override {
     if (!parent_ || channel_ > 2) return;
     if (state < 0.0f) state = 0.0f;
