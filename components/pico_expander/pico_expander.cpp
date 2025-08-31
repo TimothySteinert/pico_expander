@@ -11,7 +11,7 @@ void PicoExpanderComponent::setup() {
 }
 
 void PicoExpanderComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "PicoExpander (3x 8-bit registers for RGB):");
+  ESP_LOGCONFIG(TAG, "PicoExpander (I2C register LED driver)");
   LOG_I2C_DEVICE(this)
   if (this->is_failed()) {
     ESP_LOGE(TAG, "Communication with PicoExpander failed!");
@@ -19,14 +19,13 @@ void PicoExpanderComponent::dump_config() {
 }
 
 void PicoExpanderComponent::write_value(uint8_t channel, uint8_t value) {
-  if (channel > 2) return;
-  const uint8_t reg = channel;
+  const uint8_t reg = channel;  // channel is the raw register address (0x30–0x3E)
   if (this->write_register(reg, &value, 1) != i2c::ERROR_OK) {
     this->status_set_warning();
-    ESP_LOGW(TAG, "I2C write failed (reg=%u, val=0x%02X)", reg, value);
+    ESP_LOGW(TAG, "I2C write failed (reg=0x%02X, val=0x%02X)", reg, value);
   } else {
     this->status_clear_warning();
-    ESP_LOGV(TAG, "I2C write ok (reg=%u, val=0x%02X)", reg, value);
+    ESP_LOGV(TAG, "I2C write ok (reg=0x%02X, val=0x%02X)", reg, value);
   }
 }
 
