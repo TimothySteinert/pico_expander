@@ -17,19 +17,25 @@ PicoExpanderOutput = pico_expander_ns.class_(
     "PicoExpanderOutput", output.FloatOutput
 )
 
+# ---------------------------------------------------------------------------
 # Hub (I²C expander) config schema
+# ---------------------------------------------------------------------------
 CONFIG_SCHEMA = (
     cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoExpanderComponent)})
     .extend(cv.COMPONENT_SCHEMA)
     .extend(i2c.i2c_device_schema(0x08))
 )
 
+
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
+
+# ---------------------------------------------------------------------------
 # Output schema (for each RGB channel)
+# ---------------------------------------------------------------------------
 OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
         cv.GenerateID(CONF_ID): cv.declare_id(PicoExpanderOutput),
@@ -38,11 +44,16 @@ OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     }
 )
 
-# Register the output platform correctly for this version
-@output.register_output("pico_expander", PicoExpanderOutput)
+
 async def pico_expander_output_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
     cg.add(var.set_channel(config[CONF_NUMBER]))
     await output.register_output(var, config)
+
+
+# Register the platform explicitly (new style)
+output.register_output_platform(
+    "pico_expander", PicoExpanderOutput, pico_expander_output_to_code
+)
