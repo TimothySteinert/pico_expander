@@ -3,15 +3,11 @@ import esphome.config_validation as cv
 from esphome.components import output
 from esphome.const import CONF_ID, CONF_NUMBER
 
-from . import (
-    PicoExpanderComponent,
-    PicoExpanderOutput,
-    CONF_PICO_EXPANDER,
-)
+from . import PicoExpanderComponent, CONF_PICO_EXPANDER
 
-# Platform module for:
-# output:
-#   - platform: pico_expander
+pico_expander_ns = cg.esphome_ns.namespace("pico_expander")
+PicoExpanderOutput = pico_expander_ns.class_("PicoExpanderOutput", output.FloatOutput)
+
 CONFIG_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
         cv.GenerateID(CONF_ID): cv.declare_id(PicoExpanderOutput),
@@ -25,5 +21,4 @@ async def to_code(config):
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
     cg.add(var.set_channel(config[CONF_NUMBER]))
-    # This applies min_power/max_power/zero_means_zero/inverted/power_supply
     await output.register_output(var, config)
