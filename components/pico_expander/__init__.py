@@ -16,7 +16,7 @@ PicoExpanderComponent = pico_expander_ns.class_(
 PicoExpanderOutput = pico_expander_ns.class_("PicoExpanderOutput", output.FloatOutput)
 
 # --------------------------------------------------------------------
-# Hub schema (the expander device itself)
+# Hub schema
 # --------------------------------------------------------------------
 CONFIG_SCHEMA = (
     cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoExpanderComponent)})
@@ -30,7 +30,7 @@ async def to_code(config):
     await i2c.register_i2c_device(var, config)
 
 # --------------------------------------------------------------------
-# Output schema (channels of the expander)
+# Output schema
 # --------------------------------------------------------------------
 OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
@@ -40,10 +40,12 @@ OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     }
 )
 
-@output.register_output("pico_expander", PicoExpanderOutput)
-async def output_to_code(config):
+async def pico_expander_output_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
     cg.add(var.set_channel(config[CONF_NUMBER]))
     await output.register_output(var, config)
+
+# Important: register it here, not as a decorator
+output.register_output("pico_expander", PicoExpanderOutput, OUTPUT_SCHEMA, pico_expander_output_to_code)
