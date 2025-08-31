@@ -26,15 +26,14 @@ CONFIG_SCHEMA = (
     .extend(i2c.i2c_device_schema(0x08))
 )
 
-
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
-
 # ---------------------------------------------------------------------------
 # Output schema (for each RGB channel)
+# - FloatOutput handles min_power/max_power/zero_means_zero/inverted/etc.
 # ---------------------------------------------------------------------------
 OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
@@ -44,18 +43,16 @@ OUTPUT_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     }
 )
 
-
 async def pico_expander_output_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
     cg.add(var.set_channel(config[CONF_NUMBER]))
+    # Registers min/max/zero_means_zero/inverted/power_supply bindings, etc.
     await output.register_output(var, config)
 
-
-# ---------------------------------------------------------------------------
-# Register the output platform explicitly (ESPHome 2025.7+)
-# ---------------------------------------------------------------------------
+# ESPHome 2025.7+ registration API
+# (If your environment changes later, the loader error will tell the right symbol.)
 output.setup_output_platform_(
     "pico_expander", PicoExpanderOutput, pico_expander_output_to_code
 )
