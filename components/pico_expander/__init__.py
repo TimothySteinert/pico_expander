@@ -14,9 +14,6 @@ PicoExpanderComponent = pico_expander_ns.class_(
     "PicoExpanderComponent", cg.Component, i2c.I2CDevice
 )
 
-# Expose symbol so output.py can reference it
-PicoExpanderOutput = pico_expander_ns.class_("PicoExpanderOutput")
-
 CONFIG_SCHEMA = (
     cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoExpanderComponent)})
     .extend(cv.COMPONENT_SCHEMA)
