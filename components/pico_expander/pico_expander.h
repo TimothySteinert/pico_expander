@@ -38,6 +38,7 @@ class PicoExpanderOutput : public output::FloatOutput {
 };
 
 /** GPIO Pin: writes 0x00 (OFF) or 0x11 (ON) to configurable register (default 0x40). */
+/** GPIO Pin: writes 0x00 (OFF) or 0x11 (ON) to configurable register (0x40–0x4F). */
 class PicoExpanderGPIOPin : public GPIOPin {
  public:
   void set_parent(PicoExpanderComponent *parent) { parent_ = parent; }
@@ -46,7 +47,11 @@ class PicoExpanderGPIOPin : public GPIOPin {
   void set_inverted(bool inverted) { this->inverted_ = inverted; }
 
   void setup() override {}
-  void pin_mode(gpio::Flags flags) override { (void) flags; }
+
+  void pin_mode(gpio::Flags flags) override {
+    // For now, we only support output, but keep the value for debugging
+    this->flags_ = flags;
+  }
 
   void digital_write(bool value) override {
     if (!parent_) return;
@@ -55,7 +60,10 @@ class PicoExpanderGPIOPin : public GPIOPin {
     parent_->write_value(channel_, byte_val);
   }
 
-  bool digital_read() override { return false; }
+  bool digital_read() override {
+    // Inputs not supported, always return false
+    return false;
+  }
 
   std::string dump_summary() const override {
     char buffer[64];
@@ -67,7 +75,7 @@ class PicoExpanderGPIOPin : public GPIOPin {
 
  protected:
   PicoExpanderComponent *parent_{nullptr};
-  uint8_t channel_{0x40};
+  uint8_t channel_{0};   // Will always be set by init.py
   gpio::Flags flags_{};
   bool inverted_{false};
 };
