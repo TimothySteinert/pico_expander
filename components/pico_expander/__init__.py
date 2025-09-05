@@ -41,7 +41,6 @@ PICO_EXPANDER_PIN_SCHEMA = cv.All(
             {
                 cv.Optional("output", default=False): cv.boolean,
             },
-            pins.validate_mode,
         ),
         cv.Optional("inverted", default=False): cv.boolean,
     }
