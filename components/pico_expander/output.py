@@ -10,7 +10,7 @@ pico_expander_ns = cg.esphome_ns.namespace("pico_expander")
 PicoExpanderOutput = pico_expander_ns.class_("PicoExpanderOutput", output.FloatOutput)
 PicoExpanderGPIOOutput = pico_expander_ns.class_("PicoExpanderGPIOOutput", output.BinaryOutput)
 
-# Allow either a FLOAT (with number 0x30–0x3E) or a GPIO (fixed at 0x40)
+# Allow either a FLOAT (with number 0x30–0x3E) or a GPIO (default 0x40, but user can override)
 CONFIG_SCHEMA = cv.typed_schema(
     {
         "float": output.FLOAT_OUTPUT_SCHEMA.extend(
@@ -24,6 +24,7 @@ CONFIG_SCHEMA = cv.typed_schema(
             {
                 cv.GenerateID(CONF_ID): cv.declare_id(PicoExpanderGPIOOutput),
                 cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
+                cv.Optional(CONF_NUMBER, default=0x40): cv.int_range(min=0x40, max=0x4F),
             }
         ),
     }
@@ -36,8 +37,10 @@ async def to_code(config):
         cg.add(var.set_parent(parent))
         cg.add(var.set_channel(config[CONF_NUMBER]))
         await output.register_output(var, config)
+
     elif config["type"] == "gpio":
         var = cg.new_Pvariable(config[CONF_ID])
         parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
         cg.add(var.set_parent(parent))
+        cg.add(var.set_channel(config[CONF_NUMBER]))
         await output.register_output(var, config)
