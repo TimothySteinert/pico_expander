@@ -35,7 +35,7 @@ PICO_EXPANDER_PIN_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(PicoExpanderGPIOPin),
         cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
         cv.Required(CONF_NUMBER): cv.int_range(min=0x40, max=0x4F),
-        cv.Optional("mode", default={"output": True}): pins.gpio_flags,  # ✅ match Arduino
+        cv.Optional("mode", default={"output": True}): pins.gpio_flags_schema,
         cv.Optional("inverted", default=False): cv.boolean,              # optional
     }
 )
