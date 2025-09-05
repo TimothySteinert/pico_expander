@@ -38,19 +38,21 @@ class PicoExpanderOutput : public output::FloatOutput {
   uint8_t channel_{0};
 };
 
-/** GPIO Output: writes 0x00 (OFF) or 0x11 (ON) to fixed register 0x40. */
+/** GPIO Output: writes 0x00 (OFF) or 0x11 (ON) to configurable register (default 0x40). */
 class PicoExpanderGPIOOutput : public output::BinaryOutput {
  public:
   void set_parent(PicoExpanderComponent *parent) { parent_ = parent; }
+  void set_channel(uint8_t channel) { channel_ = channel; }  // 🔹 Added
 
  protected:
   void write_state(bool state) override {
     if (!parent_) return;
     const uint8_t byte_val = state ? 0x11 : 0x00;
-    parent_->write_value(0x40, byte_val);
+    parent_->write_value(channel_, byte_val);
   }
 
   PicoExpanderComponent *parent_{nullptr};
+  uint8_t channel_{0x40};   // 🔹 default to 0x40
 };
 
 }  // namespace pico_expander
