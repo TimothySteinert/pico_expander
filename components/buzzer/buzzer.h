@@ -42,6 +42,7 @@ template<typename... Ts> class StartAction : public Action<Ts...> {
  public:
   explicit StartAction(BuzzerComponent *parent) : parent_(parent) {}
 
+  // Must be public so init.py can call them
   TEMPLATABLE_VALUE(uint8_t, beeps)
   TEMPLATABLE_VALUE(uint32_t, short_pause)
   TEMPLATABLE_VALUE(uint32_t, long_pause)
@@ -66,7 +67,8 @@ template<typename... Ts> class StopAction : public Action<Ts...> {
  public:
   explicit StopAction(BuzzerComponent *parent) : parent_(parent) {}
   void play(Ts... x) override { this->parent_->stop(); }
- protected:
+
+ private:
   BuzzerComponent *parent_;
 };
 
