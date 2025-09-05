@@ -3,7 +3,12 @@ import esphome.config_validation as cv
 from esphome.components import output
 from esphome.const import CONF_ID, CONF_NUMBER
 
-from . import PicoExpanderComponent, CONF_PICO_EXPANDER, PicoExpanderLedOutput, PicoExpanderBuzzerOutput
+from . import (
+    PicoExpanderComponent,
+    CONF_PICO_EXPANDER,
+    PicoExpanderLedOutput,
+    PicoExpanderBuzzerOutput,
+)
 
 # --- LED Outputs (0x30–0x3E) ---
 CONFIG_SCHEMA_LED = output.FLOAT_OUTPUT_SCHEMA.extend(
@@ -23,12 +28,12 @@ async def pico_expander_led_to_code(config):
     await output.register_output(var, config)
 
 
-# --- Buzzer Output (0x40 duty + 0x41/0x42 frequency) ---
+# --- Buzzer Output (0x40–0x42) ---
 CONFIG_SCHEMA_BUZZER = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
         cv.GenerateID(CONF_ID): cv.declare_id(PicoExpanderBuzzerOutput),
         cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
-        cv.Required(CONF_NUMBER): cv.int_range(min=0x40, max=0x40),  # duty only
+        cv.Required(CONF_NUMBER): cv.int_range(min=0x40, max=0x40),
     }
 )
 
