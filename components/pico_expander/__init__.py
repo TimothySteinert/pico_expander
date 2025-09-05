@@ -46,6 +46,8 @@ async def pico_expander_pin_to_code(config):
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
     cg.add(var.set_channel(config[CONF_NUMBER]))
+    cg.add(var.set_flags(pins.gpio_flags_expr(config["mode"])))
+    cg.add(var.set_inverted(config["inverted"]))
     return var
 
 # ----- Import outputs so LED support is active -----
