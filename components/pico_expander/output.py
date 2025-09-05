@@ -3,12 +3,7 @@ import esphome.config_validation as cv
 from esphome.components import output
 from esphome.const import CONF_ID, CONF_NUMBER
 
-from . import (
-    PicoExpanderComponent,
-    CONF_PICO_EXPANDER,
-    PicoExpanderLedOutput,
-    PicoExpanderBuzzerOutput,
-)
+from . import PicoExpanderComponent, CONF_PICO_EXPANDER, PicoExpanderLedOutput, PicoExpanderBuzzerOutput
 
 # --- LED Outputs (0x30–0x3E) ---
 CONFIG_SCHEMA_LED = output.FLOAT_OUTPUT_SCHEMA.extend(
@@ -20,7 +15,7 @@ CONFIG_SCHEMA_LED = output.FLOAT_OUTPUT_SCHEMA.extend(
 )
 
 @output.register_output("pico_expander_led", PicoExpanderLedOutput, CONFIG_SCHEMA_LED)
-async def led_to_code(config):
+async def pico_expander_led_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
@@ -38,7 +33,7 @@ CONFIG_SCHEMA_BUZZER = output.FLOAT_OUTPUT_SCHEMA.extend(
 )
 
 @output.register_output("pico_expander_buzzer", PicoExpanderBuzzerOutput, CONFIG_SCHEMA_BUZZER)
-async def buzzer_to_code(config):
+async def pico_expander_buzzer_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
     cg.add(var.set_parent(parent))
