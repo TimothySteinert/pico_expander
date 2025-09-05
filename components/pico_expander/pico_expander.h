@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/i2c/i2c.h"
 #include "esphome/components/output/float_output.h"
+#include "esphome/components/output/binary_output.h"
 
 namespace esphome {
 namespace pico_expander {
@@ -35,6 +36,21 @@ class PicoExpanderOutput : public output::FloatOutput {
 
   PicoExpanderComponent *parent_{nullptr};
   uint8_t channel_{0};
+};
+
+/** GPIO Output: writes 0x00 (OFF) or 0x11 (ON) to fixed register 0x40. */
+class PicoExpanderGPIOOutput : public output::BinaryOutput {
+ public:
+  void set_parent(PicoExpanderComponent *parent) { parent_ = parent; }
+
+ protected:
+  void write_state(bool state) override {
+    if (!parent_) return;
+    const uint8_t byte_val = state ? 0x11 : 0x00;
+    parent_->write_value(0x40, byte_val);
+  }
+
+  PicoExpanderComponent *parent_{nullptr};
 };
 
 }  // namespace pico_expander
