@@ -42,28 +42,36 @@ class PicoExpanderGPIOPin : public GPIOPin {
  public:
   void set_parent(PicoExpanderComponent *parent) { parent_ = parent; }
   void set_channel(uint8_t channel) { channel_ = channel; }
+  void set_flags(gpio::Flags flags) { this->flags_ = flags; }
+  void set_inverted(bool inverted) { this->inverted_ = inverted; }
 
-  void setup() override {}  // nothing to init
-  void pin_mode(gpio::Flags flags) override { (void) flags; }  // only output supported
+  void setup() override {}
+  void pin_mode(gpio::Flags flags) override { (void) flags; }
 
   void digital_write(bool value) override {
     if (!parent_) return;
-    const uint8_t byte_val = value ? 0x11 : 0x00;
+    bool out = inverted_ ? !value : value;
+    const uint8_t byte_val = out ? 0x11 : 0x00;
     parent_->write_value(channel_, byte_val);
   }
 
-  bool digital_read() override { return false; }  // not implemented
+  bool digital_read() override { return false; }
 
   std::string dump_summary() const override {
-    char buffer[32];
-    snprintf(buffer, sizeof(buffer), "PicoExpander GPIO reg=0x%02X", channel_);
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer),
+             "PicoExpander GPIO reg=0x%02X (flags=%u, inverted=%d)",
+             channel_, static_cast<unsigned>(flags_), inverted_);
     return buffer;
   }
 
  protected:
   PicoExpanderComponent *parent_{nullptr};
   uint8_t channel_{0x40};
+  gpio::Flags flags_{};
+  bool inverted_{false};
 };
+
 
 }  // namespace pico_expander
 }  // namespace esphome
