@@ -47,14 +47,27 @@ async def to_code(config):
     ),
 )
 async def buzzer_start_to_code(config, action_id, template_arg, args):
-    var = await cg.get_variable(config[CONF_ID])
-    action = StartAction(var)
-    cg.add(action.beeps(config[CONF_BEEPS]))
-    cg.add(action.short_pause(config[CONF_SHORT_PAUSE]))
-    cg.add(action.long_pause(config[CONF_LONG_PAUSE]))
-    cg.add(action.tone(config[CONF_TONE]))
-    cg.add(action.repeat(config[CONF_REPEAT]))
-    cg.add(action.beep_length(config[CONF_BEEP_LENGTH]))
+    parent = await cg.get_variable(config[CONF_ID])
+    action = cg.new_Pvariable(action_id, template_arg, parent)
+
+    beeps = await cg.templatable(config[CONF_BEEPS], args, cg.uint8)
+    cg.add(action.set_beeps(beeps))
+
+    short_pause = await cg.templatable(config[CONF_SHORT_PAUSE], args, cg.uint32)
+    cg.add(action.set_short_pause(short_pause))
+
+    long_pause = await cg.templatable(config[CONF_LONG_PAUSE], args, cg.uint32)
+    cg.add(action.set_long_pause(long_pause))
+
+    tone = await cg.templatable(config[CONF_TONE], args, cg.uint8)
+    cg.add(action.set_tone(tone))
+
+    repeat = await cg.templatable(config[CONF_REPEAT], args, bool)
+    cg.add(action.set_repeat(repeat))
+
+    beep_length = await cg.templatable(config[CONF_BEEP_LENGTH], args, cg.uint32)
+    cg.add(action.set_beep_length(beep_length))
+
     return action
 
 @automation.register_action(
@@ -63,5 +76,5 @@ async def buzzer_start_to_code(config, action_id, template_arg, args):
     cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
 )
 async def buzzer_stop_to_code(config, action_id, template_arg, args):
-    var = await cg.get_variable(config[CONF_ID])
-    return StopAction(var)
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
