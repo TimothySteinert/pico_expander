@@ -21,7 +21,7 @@ PicoExpanderGPIOPin = pico_expander_ns.class_("PicoExpanderGPIOPin", cg.GPIOPin)
 CONFIG_SCHEMA = (
     cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoExpanderComponent)})
     .extend(cv.COMPONENT_SCHEMA)
-    .extend(i2c.i2c_device_schema(0x08))
+    .extend(i2c.i2c_device_schema(0x08))  # default I²C addr = 0x08
 )
 
 async def to_code(config):
@@ -29,14 +29,21 @@ async def to_code(config):
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
-# ----- GPIO pin schema -----
-PICO_EXPANDER_PIN_SCHEMA = cv.Schema(
+# ----- Pin schema -----
+PICO_EXPANDER_PIN_SCHEMA = cv.All(
     {
         cv.GenerateID(): cv.declare_id(PicoExpanderGPIOPin),
         cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
-        cv.Required(CONF_NUMBER): cv.int_range(min=0x40, max=0x4F),
-        cv.Optional("mode", default={"output": True}): pins.gpio_flags_schema,
-        cv.Optional("inverted", default=False): cv.boolean,              # optional
+        cv.Required(CONF_NUMBER): cv.All(
+            cv.int_range(min=0x40, max=0x4F),
+        ),
+        cv.Optional("mode", default={}): cv.All(
+            {
+                cv.Optional("output", default=False): cv.boolean,
+            },
+            pins.validate_mode,
+        ),
+        cv.Optional("inverted", default=False): cv.boolean,
     }
 )
 
@@ -44,10 +51,12 @@ PICO_EXPANDER_PIN_SCHEMA = cv.Schema(
 async def pico_expander_pin_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
+
     cg.add(var.set_parent(parent))
-    cg.add(var.set_channel(config[CONF_NUMBER]))
-    cg.add(var.set_flags(pins.gpio_flags_expr(config["mode"])))
+    num = config[CONF_NUMBER]
+    cg.add(var.set_channel(num))
     cg.add(var.set_inverted(config["inverted"]))
+    cg.add(var.set_flags(pins.gpio_flags_expr(config["mode"])))
     return var
 
 # ----- Import outputs so LED support is active -----
