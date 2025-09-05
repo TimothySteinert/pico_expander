@@ -44,4 +44,4 @@ async def to_code(config):
         parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
         cg.add(var.set_parent(parent))
         cg.add(var.set_channel(config[CONF_NUMBER]))
-        await output.register_output(var, config)
+        await output.register_binary_output(var, config)   # 🔹 FIXED
