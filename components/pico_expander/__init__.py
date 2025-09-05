@@ -24,3 +24,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+
+# 🔹 Make sure submodules are imported so their registration hooks run
+from . import output  # handles LED (FloatOutput)
+from . import gpio    # handles GPIOPin (buzzer, relays, etc.)
