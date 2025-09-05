@@ -41,6 +41,7 @@ class BuzzerComponent : public Component {
 template<typename... Ts> class StartAction : public Action<Ts...> {
  public:
   explicit StartAction(BuzzerComponent *parent) : parent_(parent) {}
+
   TEMPLATABLE_VALUE(uint8_t, beeps)
   TEMPLATABLE_VALUE(uint32_t, short_pause)
   TEMPLATABLE_VALUE(uint32_t, long_pause)
@@ -56,7 +57,8 @@ template<typename... Ts> class StartAction : public Action<Ts...> {
                          this->repeat_.value(x...),
                          this->beep_length_.value(x...));
   }
- protected:
+
+ private:
   BuzzerComponent *parent_;
 };
 
