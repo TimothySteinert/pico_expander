@@ -77,5 +77,5 @@ async def buzzer_start_to_code(config, action_id, template_arg, args):
 )
 async def buzzer_stop_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, parent)
+    return cg.new_Pvariable(action_id, template_arg, parent)
 
