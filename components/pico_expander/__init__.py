@@ -1,7 +1,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome import pins
 from esphome.components import i2c
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_NUMBER
 
 CONF_PICO_EXPANDER = "pico_expander"
 
@@ -14,6 +15,9 @@ PicoExpanderComponent = pico_expander_ns.class_(
     "PicoExpanderComponent", cg.Component, i2c.I2CDevice
 )
 
+PicoExpanderGPIOPin = pico_expander_ns.class_("PicoExpanderGPIOPin", cg.GPIOPin)
+
+# ----- Hub schema -----
 CONFIG_SCHEMA = (
     cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoExpanderComponent)})
     .extend(cv.COMPONENT_SCHEMA)
@@ -25,6 +29,22 @@ async def to_code(config):
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
-# 🔹 Make sure submodules are imported so their registration hooks run
-from . import output  # handles LED (FloatOutput)
-from . import gpio    # handles GPIOPin (buzzer, relays, etc.)
+# ----- GPIO pin schema -----
+PICO_EXPANDER_PIN_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(PicoExpanderGPIOPin),
+        cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
+        cv.Required(CONF_NUMBER): cv.int_range(min=0x40, max=0x4F),
+    }
+)
+
+@pins.PIN_SCHEMA_REGISTRY.register(CONF_PICO_EXPANDER, PICO_EXPANDER_PIN_SCHEMA)
+async def pico_expander_pin_to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    parent = await cg.get_variable(config[CONF_PICO_EXPANDER])
+    cg.add(var.set_parent(parent))
+    cg.add(var.set_channel(config[CONF_NUMBER]))
+    return var
+
+# ----- Import outputs so LED support is active -----
+from . import output
