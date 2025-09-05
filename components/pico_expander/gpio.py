@@ -13,6 +13,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(PicoExpanderGPIOPin),
         cv.Required(CONF_PICO_EXPANDER): cv.use_id(PicoExpanderComponent),
         cv.Required(CONF_NUMBER): cv.int_range(min=0x40, max=0x4F),
+        # no need for input/pullup — these are always outputs
     }
 )
 
