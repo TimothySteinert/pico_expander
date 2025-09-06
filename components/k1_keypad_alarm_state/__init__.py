@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import text_sensor, homeassistant
-from esphome.const import CONF_ENTITY_ID, CONF_ID
+from esphome.components import text_sensor
+from esphome.const import CONF_ENTITY_ID, CONF_ID, CONF_NAME
 
 DEPENDENCIES = ["homeassistant"]
 
@@ -11,23 +11,12 @@ K1KeypadAlarmState = k1_ns.class_("K1KeypadAlarmState", text_sensor.TextSensor, 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(K1KeypadAlarmState),
     cv.Required(CONF_ENTITY_ID): cv.entity_id,  # e.g. alarm_control_panel.alarmo
+    cv.Optional(CONF_NAME, default="K1 Keypad Alarm State"): cv.string,
 })
 
 
 def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
-
-    # Create a Home Assistant text sensor to subscribe to the alarm entity
-    ha_text = homeassistant.new_text_sensor(config[CONF_ENTITY_ID])
-
-    # Whenever HA entity changes, map its state and publish
-    def _callback(state):
-        if state in ("unavailable", "unknown"):
-            mapped = "connection_timed_out"
-        else:
-            mapped = state
-        var.publish_state(mapped)
-
-    ha_text.add_on_state_callback(_callback)
-
+    cg.add(var.set_entity_id(config[CONF_ENTITY_ID]))
+    cg.add(var.set_name(config[CONF_NAME]))
     cg.add(var)
