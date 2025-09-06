@@ -17,11 +17,17 @@ void K1KeypadAlarmState::setup() {
   });
 
   App.register_component(ha_sensor);
+
+  // Register the name with ESPHome’s entity system
+  if (!this->name_.empty()) {
+    this->set_name(this->name_);
+  }
 }
 
 void K1KeypadAlarmState::dump_config() {
   ESP_LOGCONFIG(TAG, "K1 Keypad Alarm State:");
   ESP_LOGCONFIG(TAG, "  Entity ID: %s", this->entity_id_.c_str());
+  ESP_LOGCONFIG(TAG, "  Name: %s", this->name_.c_str());
 }
 
 void K1KeypadAlarmState::loop() {
