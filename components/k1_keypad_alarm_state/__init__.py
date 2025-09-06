@@ -3,8 +3,6 @@ import esphome.config_validation as cv
 from esphome.components import text_sensor
 from esphome.const import CONF_ENTITY_ID, CONF_ID, CONF_NAME
 
-DEPENDENCIES = ["homeassistant"]
-
 k1_ns = cg.esphome_ns.namespace("k1_keypad_alarm_state")
 K1KeypadAlarmState = k1_ns.class_("K1KeypadAlarmState", text_sensor.TextSensor, cg.Component)
 
