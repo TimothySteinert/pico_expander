@@ -81,6 +81,15 @@ void BuzzerComponent::loop() {
   }
 }
 
+void BuzzerComponent::update_mute_switch_states() {
+  if (this->tone_switch_ != nullptr) {
+    this->tone_switch_->sync_from_parent();
+  }
+  if (this->beep_switch_ != nullptr) {
+    this->beep_switch_->sync_from_parent();
+  }
+}
+
 void BuzzerComponent::start(uint8_t beeps, uint32_t short_pause, uint32_t long_pause,
                             uint8_t tone, bool repeat, uint32_t beep_length) {
   this->beeps_ = beeps;
