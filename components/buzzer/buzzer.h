@@ -2,20 +2,17 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-#include "esphome/core/hal.h"  // GPIOPin
+#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace buzzer {
 
+// Forward declare switch helper
+class BuzzerMuteSwitch;
+
 class BuzzerComponent : public Component {
  public:
-  void setup() override {
-    if (this->pin_ != nullptr) {
-      this->pin_->setup();
-      this->pin_->digital_write(false);
-    }
-  }
-
+  void setup() override;
   void loop() override;
 
   void set_pin(GPIOPin *pin) { this->pin_ = pin; }
@@ -26,13 +23,21 @@ class BuzzerComponent : public Component {
 
   void key_beep();
 
-  // Mutes
+  // Mute controls
   void tone_mute();
   void tone_unmute();
   void beep_mute();
   void beep_unmute();
   void pinmode_mute();
   void pinmode_unmute();
+
+  // Switch registration
+  void register_tone_switch(BuzzerMuteSwitch *sw) { this->tone_switch_ = sw; }
+  void register_beep_switch(BuzzerMuteSwitch *sw) { this->beep_switch_ = sw; }
+  void update_mute_switch_states();  // called after changes
+
+  bool tone_muted() const { return tone_muted_; }
+  bool beep_muted() const { return beep_muted_; }
 
  protected:
   void apply_value_(uint8_t value);
@@ -52,16 +57,12 @@ class BuzzerComponent : public Component {
   uint32_t beep_length_{200};
   uint32_t current_interval_{0};
   uint32_t last_tick_{0};
-
-  // Pattern logical (pre-mute)
   bool pattern_output_high_{false};
 
-  // Key beep overlay
+  // Key beep overlay + retrigger
   bool key_beep_active_{false};
   uint32_t key_beep_end_{0};
   static constexpr uint32_t KEY_BEEP_LEN_MS = 50;
-
-  // Retrigger mode for key beeps
   static constexpr bool KEY_BEEP_RETRIGGER_MODE = true;
   static constexpr uint32_t KEY_BEEP_GAP_MS = 8;
   uint8_t key_beep_pending_{0};
@@ -69,9 +70,13 @@ class BuzzerComponent : public Component {
   uint32_t key_beep_next_start_{0};
 
   // Mutes
-  bool tone_muted_{false};      // User-configurable long-term tone mute
-  bool pinmode_muted_{false};   // Pin entry session mute (second gate)
-  bool beep_muted_{false};      // Key beep mute
+  bool tone_muted_{false};
+  bool pinmode_muted_{false};
+  bool beep_muted_{false};
+
+  // Switch pointers
+  BuzzerMuteSwitch *tone_switch_{nullptr};
+  BuzzerMuteSwitch *beep_switch_{nullptr};
 };
 
 // ---- Actions ----
