@@ -2,33 +2,40 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-#include "esphome/components/output/float_output.h"
+#include "esphome/core/hal.h"  // For gpio::GPIOPin
 
 namespace esphome {
 namespace buzzer {
 
 class BuzzerComponent : public Component {
  public:
-  void setup() override {}
+  void setup() override {
+    if (this->pin_ != nullptr) {
+      this->pin_->setup();          // Configure as output (schema ensures output pin)
+      this->pin_->digital_write(false);  // Ensure off at boot
+    }
+  }
   void loop() override;
 
-  void set_output(output::FloatOutput *output) { this->output_ = output; }
+  void set_pin(gpio::GPIOPin *pin) { this->pin_ = pin; }
 
   void start(uint8_t beeps, uint32_t short_pause, uint32_t long_pause,
              uint8_t tone, bool repeat, uint32_t beep_length = 200);
   void stop();
 
+  bool is_running() const { return this->running_; }
+
  protected:
   void apply_value_(uint8_t value);
 
-  output::FloatOutput *output_{nullptr};
+  gpio::GPIOPin *pin_{nullptr};
 
   bool running_{false};
   bool beep_on_{false};
   bool repeat_{false};
   uint8_t beeps_{1};
   uint8_t beeps_done_{0};
-  uint8_t tone_{128};
+  uint8_t tone_{255};  // Non-zero means ON
   uint32_t short_pause_{100};
   uint32_t long_pause_{500};
   uint32_t beep_length_{200};
@@ -42,7 +49,6 @@ template<typename... Ts> class StartAction : public Action<Ts...> {
  public:
   explicit StartAction(BuzzerComponent *parent) : parent_(parent) {}
 
-  // Must be public so init.py can call them
   TEMPLATABLE_VALUE(uint8_t, beeps)
   TEMPLATABLE_VALUE(uint32_t, short_pause)
   TEMPLATABLE_VALUE(uint32_t, long_pause)
