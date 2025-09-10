@@ -5,7 +5,8 @@ from esphome.const import CONF_ID
 k1_uart_ns = cg.esphome_ns.namespace("k1_uart")
 K1UartComponent = k1_uart_ns.class_("K1UartComponent", cg.Component)
 
-# Optional buzzer linkage
+# Reference the existing external buzzer component (no code duplication,
+# just a type handle so we can accept an ID)
 buzzer_ns = cg.esphome_ns.namespace("buzzer")
 BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
 
