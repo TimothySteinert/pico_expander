@@ -17,21 +17,14 @@ COLOR_CHANNELS = {
 
 ARGBStripOutput = argb_strip_ns.class_("ARGBStripOutput", output.FloatOutput, cg.Component)
 
-def validate(config):
-    # Nothing special yet; could cross-check group existence at codegen time
-    return config
-
-CONFIG_SCHEMA = cv.All(
-    output.FLOAT_OUTPUT_SCHEMA.extend(
-        {
-            cv.GenerateID(): cv.declare_id(ARGBStripOutput),
-            cv.GenerateID(CONF_ARGB_STRIP_ID): cv.use_id(ARGBStripComponent),
-            cv.Required(CONF_GROUP): cv.valid_name,
-            cv.Required(CONF_CHANNEL): cv.enum(COLOR_CHANNELS, lower=True),
-        }
-    ).extend(cv.COMPONENT_SCHEMA),
-    validate
-)
+CONFIG_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
+    {
+        cv.GenerateID(): cv.declare_id(ARGBStripOutput),
+        cv.GenerateID(CONF_ARGB_STRIP_ID): cv.use_id(ARGBStripComponent),
+        cv.Required(CONF_GROUP): cv.valid_name,
+        cv.Required(CONF_CHANNEL): cv.enum(COLOR_CHANNELS, lower=True),
+    }
+).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
     parent = await cg.get_variable(config[CONF_ARGB_STRIP_ID])
