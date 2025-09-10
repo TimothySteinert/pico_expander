@@ -3,6 +3,15 @@
 
 #ifdef USE_ESP32
 
+// Add these FreeRTOS includes for pdMS_TO_TICKS
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+// Fallback in case (rare) the macro isn't defined in this environment
+#ifndef pdMS_TO_TICKS
+#define pdMS_TO_TICKS(ms) ((ms) / portTICK_PERIOD_MS)
+#endif
+
 namespace esphome {
 namespace argb_strip {
 
@@ -142,7 +151,7 @@ void ARGBStripComponent::update_group_channel(const std::string &group, uint8_t 
 void ARGBStripComponent::send_frame_() {
   if (!rmt_ready_ || num_leds_ == 0) return;
 
-  // Send pixel bytes
+  // Data bytes first
   esp_err_t err = rmt_transmit(tx_channel_, bytes_encoder_, grb_.data(), grb_.size(), &tx_cfg_);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "rmt_transmit (data) failed err=0x%X", err);
@@ -154,7 +163,7 @@ void ARGBStripComponent::send_frame_() {
     return;
   }
 
-  // Send reset latch
+  // Reset latch
   err = rmt_transmit(tx_channel_, copy_encoder_, &reset_symbol_, sizeof(reset_symbol_), &tx_cfg_);
   if (err == ESP_OK) {
     rmt_tx_wait_all_done(tx_channel_, pdMS_TO_TICKS(10));
