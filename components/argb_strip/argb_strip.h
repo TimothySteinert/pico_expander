@@ -1,8 +1,8 @@
 #pragma once
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
+#include "esphome/core/gpio.h"
 #include "esphome/components/output/float_output.h"
-#include "esphome/core/gpio.h"   // Ensure full GPIOPin declaration
 
 #include <map>
 #include <vector>
@@ -29,22 +29,20 @@ class ARGBStripComponent : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
-  // Update one color channel (0=R,1=G,2=B) across all LEDs in a group.
   void update_group_channel(const std::string &group, uint8_t channel, uint8_t value);
 
  protected:
   GPIOPin *pin_{nullptr};
   uint16_t num_leds_{0};
   std::map<std::string, std::vector<int>> groups_;
-  std::vector<uint8_t> buffer_;  // GRB per LED
+  std::vector<uint8_t> buffer_;  // GRB
 
-  // RMT state
   bool rmt_ok_{false};
   int rmt_channel_{0};
 
   void init_rmt_();
   void send_();
-  int resolve_gpio_num_() const;  // helper
+  int resolve_gpio_num_() const;
 };
 
 class ARGBStripOutput : public output::FloatOutput, public Component {
@@ -57,11 +55,11 @@ class ARGBStripOutput : public output::FloatOutput, public Component {
   void dump_config() override {}
 
  protected:
-  void write_state(float state) override;  // implemented in .cpp
+  void write_state(float state) override;
 
   ARGBStripComponent *parent_{nullptr};
   std::string group_;
-  uint8_t channel_{0};  // 0=R,1=G,2=B
+  uint8_t channel_{0};
 };
 
 }  // namespace argb_strip
