@@ -31,8 +31,8 @@ class BuzzerComponent : public Component {
   void tone_unmute();
   void beep_mute();
   void beep_unmute();
-
-  bool is_running() const { return this->running_; }
+  void pinmode_mute();
+  void pinmode_unmute();
 
  protected:
   void apply_value_(uint8_t value);
@@ -53,7 +53,7 @@ class BuzzerComponent : public Component {
   uint32_t current_interval_{0};
   uint32_t last_tick_{0};
 
-  // Pattern logical output (pre-mute)
+  // Pattern logical (pre-mute)
   bool pattern_output_high_{false};
 
   // Key beep overlay
@@ -61,19 +61,20 @@ class BuzzerComponent : public Component {
   uint32_t key_beep_end_{0};
   static constexpr uint32_t KEY_BEEP_LEN_MS = 50;
 
-  // Retrigger enhancement
-  static constexpr bool KEY_BEEP_RETRIGGER_MODE = true;  // set false to revert to old behavior
-  static constexpr uint32_t KEY_BEEP_GAP_MS = 8;         // LOW gap between queued pulses
-  uint8_t key_beep_pending_{0};        // how many queued pulses waiting
-  bool key_beep_gap_phase_{false};     // currently in LOW gap before next pulse
-  uint32_t key_beep_next_start_{0};    // when to start the next queued pulse after gap
+  // Retrigger mode for key beeps
+  static constexpr bool KEY_BEEP_RETRIGGER_MODE = true;
+  static constexpr uint32_t KEY_BEEP_GAP_MS = 8;
+  uint8_t key_beep_pending_{0};
+  bool key_beep_gap_phase_{false};
+  uint32_t key_beep_next_start_{0};
 
-  // Mute flags
-  bool tone_muted_{false};
-  bool beep_muted_{false};
+  // Mutes
+  bool tone_muted_{false};      // User-configurable long-term tone mute
+  bool pinmode_muted_{false};   // Pin entry session mute (second gate)
+  bool beep_muted_{false};      // Key beep mute
 };
 
-// ---- Actions (unchanged) ----
+// ---- Actions ----
 template<typename... Ts> class StartAction : public Action<Ts...> {
  public:
   explicit StartAction(BuzzerComponent *parent) : parent_(parent) {}
@@ -139,6 +140,22 @@ template<typename... Ts> class BeepUnmuteAction : public Action<Ts...> {
  public:
   explicit BeepUnmuteAction(BuzzerComponent *parent) : parent_(parent) {}
   void play(Ts... x) override { this->parent_->beep_unmute(); }
+ private:
+  BuzzerComponent *parent_;
+};
+
+template<typename... Ts> class PinmodeMuteAction : public Action<Ts...> {
+ public:
+  explicit PinmodeMuteAction(BuzzerComponent *parent) : parent_(parent) {}
+  void play(Ts... x) override { this->parent_->pinmode_mute(); }
+ private:
+  BuzzerComponent *parent_;
+};
+
+template<typename... Ts> class PinmodeUnmuteAction : public Action<Ts...> {
+ public:
+  explicit PinmodeUnmuteAction(BuzzerComponent *parent) : parent_(parent) {}
+  void play(Ts... x) override { this->parent_->pinmode_unmute(); }
  private:
   BuzzerComponent *parent_;
 };
