@@ -14,7 +14,7 @@ void PicoUartExpanderComponent::setup() {
 
 void PicoUartExpanderComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "PicoUartExpander (UART LED driver)");
-  this->check_uart_settings(115200);  // Updated to match your baud rate
+  this->check_uart_settings(115200);
   if (this->is_failed()) {
     ESP_LOGE(TAG, "Communication with PicoUartExpander failed!");
   }
@@ -34,7 +34,7 @@ void PicoUartExpanderComponent::write_value(uint8_t channel, uint8_t value) {
   
   ESP_LOGV(TAG, "Channel %d updated to 0x%02X", channel, value);
   
-  // Always send complete message when any channel changes
+  // Send complete message immediately
   send_uart_message();
 }
 
@@ -43,17 +43,18 @@ void PicoUartExpanderComponent::send_uart_message() {
   uint8_t message[17];
   message[0] = 0xB0;  // ID byte
   
-  // Copy all 16 data bytes (15 LED + 1 buzzer)
-  memcpy(&message[1], data_bytes_, 16);
+  // Copy all 16 data bytes
+  for (int i = 0; i < 16; i++) {
+    message[i + 1] = data_bytes_[i];
+  }
   
-  // Send the complete message as one atomic write
+  // Send as one atomic write operation
   this->write_array(message, 17);
+  
+  // Force immediate transmission
   this->flush();
   
-  ESP_LOGV(TAG, "Complete UART message sent: 17 bytes");
-  
-  // Debug log the full message
-  ESP_LOGD(TAG, "Message: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", 
+  ESP_LOGD(TAG, "UART message sent (17 bytes): %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", 
            message[0], message[1], message[2], message[3], message[4], message[5], message[6], message[7], message[8], 
            message[9], message[10], message[11], message[12], message[13], message[14], message[15], message[16]);
 }
