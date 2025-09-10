@@ -1,6 +1,7 @@
 #include "i2c_fifo_test.h"
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
+#include <cstdio>
 
 namespace esphome {
 namespace i2c_fifo_test {
@@ -60,15 +61,16 @@ void I2CFifoTestComponent::read_fifo_data_() {
   // Log the received data in a readable format
   ESP_LOGI(TAG, "FIFO Data received:");
   
-  // Log as hex bytes (16 bytes per line)
+  // Log as hex bytes (16 bytes per line) using C string formatting
   for (int i = 0; i < FIFO_SIZE; i += 16) {
-    String line = "  ";
+    char line[64] = "  ";  // Start with 2 spaces
+    char *ptr = line + 2;
+    
     for (int j = 0; j < 16 && (i + j) < FIFO_SIZE; j++) {
-      char hex_str[4];
-      snprintf(hex_str, sizeof(hex_str), "%02X ", fifo_data[i + j]);
-      line += hex_str;
+      ptr += snprintf(ptr, 4, "%02X ", fifo_data[i + j]);
     }
-    ESP_LOGI(TAG, "%s", line.c_str());
+    
+    ESP_LOGI(TAG, "%s", line);
   }
   
   // Also log specific keypad message if it matches expected pattern
