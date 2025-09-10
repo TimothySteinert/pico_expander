@@ -33,7 +33,8 @@ const std::vector<int> *ARGBStripComponent::get_group(const std::string &name) c
 }
 float ARGBStripComponent::get_group_max(const std::string &name) const {
   auto it = group_max_.find(name);
-  if (it == groups_.end()) return 1.0f;
+  if (it == group_max_.end())  // FIX: was groups_.end()
+    return 1.0f;
   return it->second;
 }
 uint8_t ARGBStripComponent::scale_group_value_(const std::string &group, uint8_t v) const {
