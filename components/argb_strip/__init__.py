@@ -33,15 +33,12 @@ async def to_code(config):
 
     pin_expr = await cg.gpio_pin_expression(config[CONF_PIN])
     cg.add(var.set_pin(pin_expr))
-    num_leds = config[CONF_NUM_LEDS]
-    cg.add(var.set_num_leds(num_leds))
-
-    raw_pin_num = config[CONF_PIN]['number']
-    cg.add(var.set_raw_gpio(raw_pin_num))
-
+    cg.add(var.set_num_leds(config[CONF_NUM_LEDS]))
+    cg.add(var.set_raw_gpio(config[CONF_PIN]['number']))
     cg.add(var.set_global_brightness(config[CONF_GLOBAL_BRIGHTNESS]))
     cg.add(var.set_gamma_enabled(config[CONF_GAMMA]))
 
+    num_leds = config[CONF_NUM_LEDS]
     for name, led_list in config[CONF_GROUPS].items():
         for led in led_list:
             if led > num_leds:
