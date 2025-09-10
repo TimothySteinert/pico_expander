@@ -10,14 +10,15 @@ enum class BuzzerMuteSwitchType : uint8_t { TONE = 0, BEEP = 1 };
 
 class BuzzerMuteSwitch : public switch_::Switch, public Component {
  public:
-  BuzzerMuteSwitch(BuzzerComponent *parent) : parent_(parent) {}
+  explicit BuzzerMuteSwitch(BuzzerComponent *parent) : parent_(parent) {}
 
   void set_type(uint8_t t) { this->type_ = static_cast<BuzzerMuteSwitchType>(t); }
 
   void setup() override {
     // Publish current mute state (ON means muted)
-    bool st = (this->type_ == BuzzerMuteSwitchType::TONE) ? parent_->tone_muted()
-                                                          : parent_->beep_muted();
+    bool st = (this->type_ == BuzzerMuteSwitchType::TONE)
+                  ? parent_->tone_muted()
+                  : parent_->beep_muted();
     this->publish_state(st);
   }
 
@@ -29,14 +30,14 @@ class BuzzerMuteSwitch : public switch_::Switch, public Component {
       if (state) parent_->beep_mute();
       else parent_->beep_unmute();
     }
-    // Parent will call publish_state() again via update_mute_switch_states, but
-    // we can optimistically publish now to keep UI snappy.
+    // Optimistic publish (parent will sync again if needed)
     this->publish_state(state);
   }
 
   void sync_from_parent() {
-    bool st = (this->type_ == BuzzerMuteSwitchType::TONE) ? parent_->tone_muted()
-                                                          : parent_->beep_muted();
+    bool st = (this->type_ == BuzzerMuteSwitchType::TONE)
+                  ? parent_->tone_muted()
+                  : parent_->beep_muted();
     this->publish_state(st);
   }
 
