@@ -30,7 +30,7 @@ void BuzzerComponent::loop() {
       current_interval_ = short_pause_;
     }
   } else {
-    // Turn ON (any non-zero tone value => ON)
+    // Turn ON
     apply_value_(tone_);
     beep_on_ = true;
     current_interval_ = beep_length_;
@@ -52,26 +52,24 @@ void BuzzerComponent::start(uint8_t beeps, uint32_t short_pause, uint32_t long_p
   this->current_interval_ = 0;
 
   if (beeps == 0 && !repeat) {
-    // Nothing to do
     this->running_ = false;
     apply_value_(0);
     ESP_LOGD(TAG, "Start called with 0 beeps and no repeat; nothing to play.");
     return;
   }
 
-  ESP_LOGD(TAG, "Started buzzer: beeps=%d short=%ums long=%ums tone=%u repeat=%d len=%ums",
+  ESP_LOGD(TAG, "Started: beeps=%u short=%ums long=%ums tone=%u repeat=%d len=%ums",
            beeps, short_pause, long_pause, tone, repeat, beep_length);
 }
 
 void BuzzerComponent::stop() {
   this->running_ = false;
   apply_value_(0);
-  ESP_LOGD(TAG, "Stopped buzzer");
+  ESP_LOGD(TAG, "Stopped");
 }
 
 void BuzzerComponent::apply_value_(uint8_t value) {
   if (this->pin_ != nullptr) {
-    // HIGH if value non-zero, else LOW
     this->pin_->digital_write(value != 0);
   }
   ESP_LOGV(TAG, "GPIO write: %s", value != 0 ? "HIGH" : "LOW");
