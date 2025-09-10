@@ -3,20 +3,19 @@ import esphome.config_validation as cv
 from esphome.components import uart
 from esphome.const import CONF_ID
 
+CONF_PICO_UART_EXPANDER = "pico_uart_expander"
+
 DEPENDENCIES = ["uart"]
+MULTI_CONF = True
 
 pico_uart_expander_ns = cg.esphome_ns.namespace("pico_uart_expander")
 
-PicoUARTExpanderComponent = pico_uart_expander_ns.class_(
-    "PicoUARTExpanderComponent", cg.Component, uart.UARTDevice
+PicoUartExpanderComponent = pico_uart_expander_ns.class_(
+    "PicoUartExpanderComponent", cg.Component, uart.UARTDevice
 )
 
 CONFIG_SCHEMA = (
-    cv.Schema(
-        {
-            cv.GenerateID(): cv.declare_id(PicoUARTExpanderComponent),
-        }
-    )
+    cv.Schema({cv.Required(CONF_ID): cv.declare_id(PicoUartExpanderComponent)})
     .extend(cv.COMPONENT_SCHEMA)
     .extend(uart.UART_DEVICE_SCHEMA)
 )
