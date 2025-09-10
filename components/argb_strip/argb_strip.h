@@ -8,7 +8,6 @@
 #include <string>
 #include <cstdint>
 #include <array>
-#include <set>
 
 #ifdef USE_ESP32
 #include "esp_idf_version.h"
@@ -22,7 +21,7 @@
 namespace esphome {
 namespace argb_strip {
 
-static const char *const ARGB_STRIP_VERSION = "0.5.2-fade";
+static const char *const ARGB_STRIP_VERSION = "0.5.2-fade+patch";
 
 enum class StripMode : uint8_t {
   NORMAL = 0,
@@ -80,35 +79,29 @@ class ARGBStripComponent : public Component {
   std::map<std::string, std::vector<int>> groups_;
   std::map<std::string, float> group_max_;
 
-  // Base & working frames
   std::vector<uint8_t> base_raw_grb_;
   std::vector<uint8_t> working_grb_;
   std::vector<uint8_t> last_sent_grb_;
 
-  // Modes
   StripMode strip_mode_{StripMode::NORMAL};
   ArmSelectMode arm_select_mode_{ArmSelectMode::NONE};
 
-  // RFID Transition
   RfidTransitionState rfid_transition_{RfidTransitionState::INACTIVE};
   uint32_t rfid_transition_start_ms_{0};
   static constexpr uint32_t RFID_FADE_MS = 500;
   uint32_t rainbow_start_ms_{0};
   static constexpr uint32_t RAINBOW_CYCLE_MS = 8000;
 
-  // Flash overlay
   static constexpr uint32_t FLASH_ON_MS = 400;
   static constexpr uint32_t FLASH_OFF_MS = 400;
 
-  // Deferred (pending) writes for arm select target group
   struct PendingGroup {
     bool used = false;
     std::array<bool, 3> channel_set{{false,false,false}};
-    std::array<uint8_t, 3> values{{0,0,0}}; // R,G,B logical order
+    std::array<uint8_t, 3> values{{0,0,0}}; // R,G,B logical
   };
   std::map<std::string, PendingGroup> pending_writes_;
 
-  // RMT
   rmt_channel_handle_t tx_channel_{nullptr};
   rmt_encoder_handle_t bytes_encoder_{nullptr};
   rmt_encoder_handle_t copy_encoder_{nullptr};
@@ -123,18 +116,16 @@ class ARGBStripComponent : public Component {
   void init_rmt_();
   void mark_dirty_() { frame_dirty_ = true; }
 
-  // Recomposition
   void recomposite_();
   void build_normal_base_();
   void build_rainbow_frame_(float fade_factor);
   void apply_arm_select_overlay_();
   void send_frame_();
 
-  // Helpers
   uint8_t scale_group_value_(const std::string &group, uint8_t v) const;
   int get_arm_select_led_index_() const;
   std::string get_arm_select_group_name_() const;
-  bool rfid_visual_active_() const; // any RFID visual phase
+  bool rfid_visual_active_() const;
   float current_rfid_fade_factor_() const;
   void finish_rfid_fade_out_();
   void apply_pending_for_group_(const std::string &group);
