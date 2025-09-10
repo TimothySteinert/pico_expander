@@ -1,55 +1,61 @@
 #include "argb_strip.h"
 #include "esphome/core/log.h"
-
-#ifdef USE_ESP32
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <algorithm>
+#include <cmath>
+
 #ifndef pdMS_TO_TICKS
 #define pdMS_TO_TICKS(ms) ((ms) / portTICK_PERIOD_MS)
 #endif
 
+#ifdef USE_ESP32
 namespace esphome {
 namespace argb_strip {
 
 static const char *const TAG = "argb_strip";
 
-// WS2812 (800kHz) timing expressed in 25 ns ticks with 40MHz resolution
-static const uint32_t T0H = 16;  // 0.40us
-static const uint32_t T0L = 34;  // 0.85us
-static const uint32_t T1H = 32;  // 0.80us
-static const uint32_t T1L = 18;  // 0.45us
+static const uint32_t T0H = 16;
+static const uint32_t T0L = 34;
+static const uint32_t T1H = 32;
+static const uint32_t T1L = 18;
 
+// ------------ Group Management -------------
 void ARGBStripComponent::add_group(const std::string &name, const std::vector<int> &leds, float max_brightness) {
   groups_[name] = leds;
   group_max_[name] = max_brightness;
 }
-
 const std::vector<int> *ARGBStripComponent::get_group(const std::string &name) const {
   auto it = groups_.find(name);
   if (it == groups_.end()) return nullptr;
   return &it->second;
 }
-
 float ARGBStripComponent::get_group_max(const std::string &name) const {
   auto it = group_max_.find(name);
   if (it == group_max_.end()) return 1.0f;
   return it->second;
 }
+uint8_t ARGBStripComponent::scale_group_value_(const std::string &group, uint8_t v) const {
+  float gm = get_group_max(group);
+  float scaled = v * gm;
+  if (scaled > 255.f) scaled = 255.f;
+  return (uint8_t)(scaled + 0.5f);
+}
 
+// ------------ Lifecycle -------------
 void ARGBStripComponent::setup() {
-  ESP_LOGCONFIG(TAG, "ARGB Strip v%s (per-group max brightness) LEDs=%u",
-                ARGB_STRIP_VERSION, num_leds_);
+  ESP_LOGCONFIG(TAG, "ARGB Strip v%s (internal modes)", ARGB_STRIP_VERSION);
   if (!pin_ || raw_gpio_ < 0) {
     ESP_LOGE(TAG, "Invalid pin configuration");
     this->mark_failed();
     return;
   }
-
   pin_->setup();
   pin_->digital_write(false);
 
-  grb_.assign(num_leds_ * 3, 0);
+  base_raw_grb_.assign(num_leds_ * 3, 0);
+  working_grb_.assign(num_leds_ * 3, 0);
+  last_sent_grb_.assign(num_leds_ * 3, 255);
 
   init_rmt_();
   if (!rmt_ready_) {
@@ -58,37 +64,57 @@ void ARGBStripComponent::setup() {
     return;
   }
 
-  // Reset symbol: > 50us low => 2000 ticks @25ns
   reset_symbol_.level0 = 0;
   reset_symbol_.duration0 = 2000;
   reset_symbol_.level1 = 0;
   reset_symbol_.duration1 = 0;
 
-  send_frame_(); // Clear
+  rainbow_start_ms_ = millis();
+  mark_dirty_();
 }
 
 void ARGBStripComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "ARGB Strip:");
+  ESP_LOGCONFIG(TAG, "ARGB Strip (internal control):");
   LOG_PIN("  Pin: ", pin_);
   ESP_LOGCONFIG(TAG, "  Raw GPIO: %d", raw_gpio_);
   ESP_LOGCONFIG(TAG, "  LEDs: %u", num_leds_);
   ESP_LOGCONFIG(TAG, "  RMT Ready: %s", rmt_ready_ ? "YES" : "NO");
-  ESP_LOGCONFIG(TAG, "  Global Brightness: %.2f", global_brightness_);
+  ESP_LOGCONFIG(TAG, "  Strip Mode: %s", strip_mode_ == StripMode::NORMAL ? "NORMAL" : "RFID_PROGRAM");
+  ESP_LOGCONFIG(TAG, "  Arm Select Mode: %d", static_cast<int>(arm_select_mode_));
   if (!groups_.empty()) {
     ESP_LOGCONFIG(TAG, "  Groups:");
     for (auto &kv : groups_) {
-      float mx = get_group_max(kv.first);
-      ESP_LOGCONFIG(TAG, "    %s -> %u pixel(s), max_brightness=%.3f",
-                    kv.first.c_str(), (unsigned) kv.second.size(), mx);
+      ESP_LOGCONFIG(TAG, "    %s -> %u pixel(s), max=%.3f",
+        kv.first.c_str(), (unsigned) kv.second.size(), get_group_max(kv.first));
     }
   }
 }
 
+void ARGBStripComponent::loop() {
+  uint32_t now = millis();
+  bool anim_tick = (now - last_anim_eval_) >= ANIM_TICK_MS;
+
+  if (strip_mode_ == StripMode::RFID_PROGRAM) {
+    if (anim_tick) mark_dirty_();
+  } else if (arm_select_mode_ != ArmSelectMode::NONE) {
+    if (anim_tick) mark_dirty_();
+  }
+
+  if (anim_tick) last_anim_eval_ = now;
+
+  if (frame_dirty_) {
+    recomposite_();
+    send_frame_();
+    frame_dirty_ = false;
+  }
+}
+
+// ------------ RMT -------------
 void ARGBStripComponent::init_rmt_() {
   rmt_tx_channel_config_t ch_cfg{};
   ch_cfg.gpio_num = (gpio_num_t) raw_gpio_;
   ch_cfg.clk_src = RMT_CLK_SRC_DEFAULT;
-  ch_cfg.resolution_hz = 40'000'000; // 40 MHz (25ns)
+  ch_cfg.resolution_hz = 40'000'000;
   ch_cfg.mem_block_symbols = 64;
   ch_cfg.trans_queue_depth = 4;
 
@@ -129,42 +155,164 @@ void ARGBStripComponent::init_rmt_() {
   ESP_LOGD(TAG, "RMT channel initialized on GPIO %d", raw_gpio_);
 }
 
-uint8_t ARGBStripComponent::apply_scaling_(const std::string &group, uint8_t base_value) const {
-  float gmax = get_group_max(group);
-  float scaled = base_value * gmax;
-  if (global_brightness_ < 0.999f)
-    scaled *= global_brightness_;
-  if (scaled > 255.0f) scaled = 255.0f;
-  return (uint8_t)(scaled + 0.5f);
-}
-
+// ------------ Base Channel Writes -------------
 void ARGBStripComponent::update_group_channel(const std::string &group, uint8_t channel, uint8_t value) {
-  if (!rmt_ready_) return;
-  auto g = this->get_group(group);
-  if (!g) {
-    ESP_LOGW(TAG, "Group '%s' not found", group.c_str());
-    return;
-  }
-
-  uint8_t adj = apply_scaling_(group, value);
-
-  // Stored in GRB order for each LED: [G,R,B]
+  if (strip_mode_ != StripMode::NORMAL) return; // ignore in RFID mode
+  auto g = get_group(group);
+  if (!g) return;
   for (int led : *g) {
     if (led < 0 || (uint16_t) led >= num_leds_) continue;
     uint32_t base = led * 3;
     switch (channel) {
-      case 0: grb_[base + 1] = adj; break; // R
-      case 1: grb_[base + 0] = adj; break; // G
-      case 2: grb_[base + 2] = adj; break; // B
+      case 0: base_raw_grb_[base + 1] = value; break; // R
+      case 1: base_raw_grb_[base + 0] = value; break; // G
+      case 2: base_raw_grb_[base + 2] = value; break; // B
     }
   }
-  send_frame_();
+  mark_dirty_();
 }
 
+// ------------ Internal Control Methods -------------
+void ARGBStripComponent::enable_rfid_mode() {
+  if (strip_mode_ == StripMode::RFID_PROGRAM) return;
+  strip_mode_ = StripMode::RFID_PROGRAM;
+  rainbow_start_ms_ = millis();
+  mark_dirty_();
+}
+
+void ARGBStripComponent::disable_rfid_mode() {
+  if (strip_mode_ == StripMode::NORMAL) return;
+  strip_mode_ = StripMode::NORMAL;
+  mark_dirty_();
+}
+
+void ARGBStripComponent::set_arm_select_mode(ArmSelectMode m) {
+  if (arm_select_mode_ == m) return;
+  arm_select_mode_ = m;
+  // If RFID mode is active, overlay suppressed automatically—no need to early return.
+  mark_dirty_();
+}
+
+void ARGBStripComponent::set_arm_select_mode_by_name(const char *name) {
+  if (!name) return;
+  std::string s{name};
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return (char) std::tolower(c); });
+  ArmSelectMode m = ArmSelectMode::NONE;
+  if (s == "away") m = ArmSelectMode::AWAY;
+  else if (s == "home") m = ArmSelectMode::HOME;
+  else if (s == "disarm") m = ArmSelectMode::DISARM;
+  else if (s == "night") m = ArmSelectMode::NIGHT;
+  else if (s == "vacation") m = ArmSelectMode::VACATION;
+  else if (s == "bypass") m = ArmSelectMode::BYPASS;
+  set_arm_select_mode(m);
+}
+
+// ------------ Recomposition -------------
+void ARGBStripComponent::recomposite_() {
+  if (strip_mode_ == StripMode::RFID_PROGRAM) {
+    build_rainbow_frame_();
+  } else {
+    build_normal_base_();
+    // RFID mode suppresses overlay; since we are not in RFID here, we may overlay if needed.
+    if (arm_select_mode_ != ArmSelectMode::NONE) {
+      apply_arm_select_overlay_();
+    }
+  }
+}
+
+void ARGBStripComponent::build_normal_base_() {
+  working_grb_ = base_raw_grb_;
+  for (auto &kv : groups_) {
+    float gm = get_group_max(kv.first);
+    if (gm >= 0.999f) continue;
+    for (int led : kv.second) {
+      if (led < 0 || (uint16_t) led >= num_leds_) continue;
+      uint32_t b = led * 3;
+      for (int i=0;i<3;i++) {
+        float scaled = working_grb_[b+i] * gm;
+        if (scaled > 255.f) scaled = 255.f;
+        working_grb_[b+i] = (uint8_t)(scaled + 0.5f);
+      }
+    }
+  }
+}
+
+void ARGBStripComponent::build_rainbow_frame_() {
+  if (num_leds_ == 0) return;
+  working_grb_.assign(num_leds_ * 3, 0);
+  uint32_t now = millis();
+  uint32_t elapsed = now - rainbow_start_ms_;
+  float base_h = fmodf((float) elapsed / (float) RAINBOW_CYCLE_MS, 1.0f);
+  for (uint16_t i = 0; i < num_leds_; i++) {
+    float h = fmodf(base_h + (float) i / num_leds_, 1.0f);
+    uint8_t g, r, b;
+    hsv_to_grb_(h, 1.0f, 1.0f, g, r, b);
+    uint32_t idx = i * 3;
+    working_grb_[idx+0] = g;
+    working_grb_[idx+1] = r;
+    working_grb_[idx+2] = b;
+  }
+}
+
+void ARGBStripComponent::apply_arm_select_overlay_() {
+  if (strip_mode_ == StripMode::RFID_PROGRAM) return; // suppressed
+  int led_index = get_arm_select_led_index_();
+  if (led_index < 0) return;
+
+  uint32_t now = millis();
+  uint32_t phase = (now % (FLASH_ON_MS + FLASH_OFF_MS));
+  bool on_phase = phase < FLASH_ON_MS;
+
+  uint8_t flash_r = 255, flash_g = 0, flash_b = 0;
+  switch (arm_select_mode_) {
+    case ArmSelectMode::VACATION:
+      // Placeholder color (purple)
+      flash_r = 128; flash_g = 0; flash_b = 118;
+      break;
+    case ArmSelectMode::BYPASS:
+      // Placeholder color (orange)
+      flash_r = 255; flash_g = 80; flash_b = 0;
+      break;
+    default:
+      break;
+  }
+
+  if (on_phase) {
+    uint32_t base = led_index * 3;
+    working_grb_[base + 0] = flash_g;
+    working_grb_[base + 1] = flash_r;
+    working_grb_[base + 2] = flash_b;
+  }
+}
+
+int ARGBStripComponent::get_arm_select_led_index_() const {
+  std::string target_group;
+  switch (arm_select_mode_) {
+    case ArmSelectMode::AWAY: target_group = "away"; break;
+    case ArmSelectMode::HOME: target_group = "home"; break;
+    case ArmSelectMode::DISARM: target_group = "disarm"; break;
+    case ArmSelectMode::NIGHT:
+    case ArmSelectMode::VACATION:
+    case ArmSelectMode::BYPASS:
+      target_group = "custom"; break;
+    default:
+      return -1;
+  }
+  auto g = get_group(target_group);
+  if (!g || g->empty()) return -1;
+  return (*g)[0];
+}
+
+// ------------ Sending -------------
 void ARGBStripComponent::send_frame_() {
   if (!rmt_ready_ || num_leds_ == 0) return;
+  bool changed = false;
+  for (size_t i=0;i<working_grb_.size();i++) {
+    if (working_grb_[i] != last_sent_grb_[i]) { changed = true; break; }
+  }
+  if (!changed) return;
 
-  esp_err_t err = rmt_transmit(tx_channel_, bytes_encoder_, grb_.data(), grb_.size(), &tx_cfg_);
+  esp_err_t err = rmt_transmit(tx_channel_, bytes_encoder_, working_grb_.data(), working_grb_.size(), &tx_cfg_);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "rmt_transmit (data) failed err=0x%X", err);
     return;
@@ -174,24 +322,50 @@ void ARGBStripComponent::send_frame_() {
     ESP_LOGE(TAG, "rmt_tx_wait_all_done (data) err=0x%X", err);
     return;
   }
-
   err = rmt_transmit(tx_channel_, copy_encoder_, &reset_symbol_, sizeof(reset_symbol_), &tx_cfg_);
   if (err == ESP_OK) {
     rmt_tx_wait_all_done(tx_channel_, pdMS_TO_TICKS(10));
-  } else {
-    ESP_LOGE(TAG, "rmt_transmit (reset) failed err=0x%X", err);
   }
+
+  last_sent_grb_ = working_grb_;
 }
 
+// ------------ Color Utility -------------
+void ARGBStripComponent::hsv_to_grb_(float h, float s, float v, uint8_t &g, uint8_t &r, uint8_t &b) const {
+  if (s <= 0.0f) {
+    uint8_t val = (uint8_t)(v * 255.0f + 0.5f);
+    g = r = b = val;
+    return;
+  }
+  h = fmodf(h, 1.0f) * 6.0f;
+  int i = (int) floorf(h);
+  float f = h - i;
+  float p = v * (1.0f - s);
+  float q = v * (1.0f - s * f);
+  float t = v * (1.0f - s * (1.0f - f));
+  float rf, gf, bf;
+  switch (i) {
+    case 0: rf = v; gf = t; bf = p; break;
+    case 1: rf = q; gf = v; bf = p; break;
+    case 2: rf = p; gf = v; bf = t; break;
+    case 3: rf = p; gf = q; bf = v; break;
+    case 4: rf = t; gf = p; bf = v; break;
+    default: rf = v; gf = p; bf = q; break;
+  }
+  r = (uint8_t)(rf * 255.0f + 0.5f);
+  g = (uint8_t)(gf * 255.0f + 0.5f);
+  b = (uint8_t)(bf * 255.0f + 0.5f);
+}
+
+// ------------ Output Channel -------------
 void ARGBStripOutput::write_state(float state) {
   if (!parent_) return;
   if (state < 0.f) state = 0.f;
   if (state > 1.f) state = 1.f;
-  uint8_t v = static_cast<uint8_t>(state * 255.0f + 0.5f);
+  uint8_t v = (uint8_t)(state * 255.0f + 0.5f);
   parent_->update_group_channel(group_, channel_, v);
 }
 
-}  // namespace argb_strip
-}  // namespace esphome
-
-#endif  // USE_ESP32
+} // namespace argb_strip
+} // namespace esphome
+#endif
