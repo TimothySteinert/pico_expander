@@ -9,12 +9,10 @@ BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
 StartAction = buzzer_ns.class_("StartAction", automation.Action)
 StopAction = buzzer_ns.class_("StopAction", automation.Action)
 KeyBeepAction = buzzer_ns.class_("KeyBeepAction", automation.Action)
-
 ToneMuteAction = buzzer_ns.class_("ToneMuteAction", automation.Action)
 ToneUnmuteAction = buzzer_ns.class_("ToneUnmuteAction", automation.Action)
 BeepMuteAction = buzzer_ns.class_("BeepMuteAction", automation.Action)
 BeepUnmuteAction = buzzer_ns.class_("BeepUnmuteAction", automation.Action)
-
 PinmodeMuteAction = buzzer_ns.class_("PinmodeMuteAction", automation.Action)
 PinmodeUnmuteAction = buzzer_ns.class_("PinmodeUnmuteAction", automation.Action)
 
@@ -99,7 +97,6 @@ async def buzzer_key_beep_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, parent)
 
-# Tone mute/unmute
 @automation.register_action(
     "buzzer.tone_mute",
     ToneMuteAction,
@@ -118,7 +115,6 @@ async def buzzer_tone_unmute_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, parent)
 
-# Beep mute/unmute
 @automation.register_action(
     "buzzer.beep_mute",
     BeepMuteAction,
@@ -137,7 +133,6 @@ async def buzzer_beep_unmute_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, parent)
 
-# Pinmode mute/unmute
 @automation.register_action(
     "buzzer.pinmode_mute",
     PinmodeMuteAction,
