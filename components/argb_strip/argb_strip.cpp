@@ -115,7 +115,6 @@ void ARGBStripComponent::dump_config() {
   }
 }
 
-// ---------------- Loop ----------------
 void ARGBStripComponent::loop() {
   uint32_t now = millis();
   bool anim_tick = (now - last_anim_eval_) >= ANIM_TICK_MS;
@@ -136,11 +135,9 @@ void ARGBStripComponent::loop() {
     if (arm_select_mode_ != ArmSelectMode::NONE && anim_tick) {
       mark_dirty_();
     }
-    // Check if we should finalize a pending disable (only when not in RFID visual)
     if (arm_select_disable_pending_) {
-      // Determine phase
       uint32_t phase = (now % (FLASH_ON_MS + FLASH_OFF_MS));
-      bool in_off_phase = phase >= FLASH_ON_MS; // OFF phase is the latter part
+      bool in_off_phase = phase >= FLASH_ON_MS;
       if (in_off_phase) {
         finalize_arm_select_disable_();
       }
@@ -210,7 +207,6 @@ void ARGBStripComponent::update_group_channel(const std::string &group, uint8_t 
                (!target_group.empty()) &&
                (group == target_group) &&
                !arm_select_disable_pending_;
-  // If disable is pending we still defer until finalization.
 
   if (defer) {
     auto &pend = pending_writes_[group];
@@ -259,8 +255,6 @@ void ARGBStripComponent::disable_rfid_mode() {
 void ARGBStripComponent::finish_rfid_fade_out_() {
   strip_mode_ = StripMode::NORMAL;
   rfid_transition_ = RfidTransitionState::INACTIVE;
-  // If we had a pending arm-select disable and RFID suppressed the flash,
-  // finalize immediately (no need to wait for OFF phase because flash not visible).
   if (arm_select_disable_pending_) {
     finalize_arm_select_disable_();
   } else {
@@ -268,7 +262,6 @@ void ARGBStripComponent::finish_rfid_fade_out_() {
   }
 }
 
-// Modified: supports pending disable logic
 void ARGBStripComponent::set_arm_select_mode(ArmSelectMode m) {
   if (arm_select_mode_ == m) return;
 
@@ -285,26 +278,19 @@ void ARGBStripComponent::set_arm_select_mode(ArmSelectMode m) {
     default: break; // NONE
   }
 
-  // If we are changing to NONE, initiate pending disable logic
   if (m == ArmSelectMode::NONE) {
     if (arm_select_mode_ != ArmSelectMode::NONE) {
-      // Start pending disable (do not flush yet)
       arm_select_disable_pending_ = true;
-      // We keep current mode active until OFF phase is reached
-      // (rfid_visual_active_() suppresses overlay anyway)
     }
-    return; // Do not change arm_select_mode_ yet
+    return;
   }
 
-  // If there was a pending disable and user selects a new mode instead: cancel pending disable
   if (arm_select_disable_pending_) {
     arm_select_disable_pending_ = false;
-    // Flush previous group's pending writes (since we are leaving that selection path)
     if (!prev_group.empty())
       apply_pending_for_group_(prev_group);
   }
 
-  // Normal cross-mode switch behavior:
   if (arm_select_mode_ != ArmSelectMode::NONE && !prev_group.empty() && prev_group != new_group) {
     apply_pending_for_group_(prev_group);
   }
@@ -325,7 +311,6 @@ void ARGBStripComponent::set_arm_select_mode(ArmSelectMode m) {
 }
 
 void ARGBStripComponent::finalize_arm_select_disable_() {
-  // We are currently still in a mode (not NONE yet), apply pending writes
   std::string prev_group = get_arm_select_group_name_();
   if (!prev_group.empty())
     apply_pending_for_group_(prev_group);
@@ -425,7 +410,7 @@ void ARGBStripComponent::recomposite_() {
     build_rainbow_frame_(f);
   } else {
     build_normal_base_();
-    if ((arm_select_mode_ != ArmSelectMode::NONE || arm_select_disable_pending_)) {
+    if (arm_select_mode_ != ArmSelectMode::NONE || arm_select_disable_pending_) {
       apply_arm_select_overlay_();
     }
   }
@@ -474,10 +459,9 @@ void ARGBStripComponent::build_rainbow_frame_(float fade_factor) {
 }
 
 void ARGBStripComponent::apply_arm_select_overlay_() {
-  // If fully disabled (no mode and not pending), nothing
   if (arm_select_mode_ == ArmSelectMode::NONE && !arm_select_disable_pending_)
     return;
-  if (rfid_visual_active_()) return; // suppressed
+  if (rfid_visual_active_()) return;
 
   int led_index = get_arm_select_led_index_();
   if (led_index < 0) return;
@@ -489,13 +473,10 @@ void ARGBStripComponent::apply_arm_select_overlay_() {
   uint8_t flash_r = 255, flash_g = 0, flash_b = 0;
   switch (arm_select_mode_) {
     case ArmSelectMode::VACATION:
-      flash_r = 128; flash_g = 0; flash_b = 118;
-      break;
+      flash_r = 128; flash_g = 0; flash_b = 118; break;
     case ArmSelectMode::BYPASS:
-      flash_r = 255; flash_g = 80; flash_b = 0;
-      break;
-    default:
-      break;
+      flash_r = 255; flash_g = 80; flash_b = 0; break;
+    default: break;
   }
 
   uint32_t base = led_index * 3;
@@ -504,7 +485,6 @@ void ARGBStripComponent::apply_arm_select_overlay_() {
     working_grb_[base + 1] = flash_r;
     working_grb_[base + 2] = flash_b;
   } else {
-    // Force OFF (0,0,0) regardless of underlying base color
     working_grb_[base + 0] = 0;
     working_grb_[base + 1] = 0;
     working_grb_[base + 2] = 0;
@@ -575,4 +555,4 @@ void ARGBStripOutput::write_state(float state) {
 
 }  // namespace argb_strip
 }  // namespace esphome
-#endif
+#endif  // USE_ESP32
