@@ -7,6 +7,7 @@ buzzer_ns = cg.esphome_ns.namespace("buzzer")
 BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
 StartAction = buzzer_ns.class_("StartAction", automation.Action)
 StopAction = buzzer_ns.class_("StopAction", automation.Action)
+KeyBeepAction = buzzer_ns.class_("KeyBeepAction", automation.Action)
 
 CONF_BEEPS = "beeps"
 CONF_SHORT_PAUSE = "short_pause"
@@ -20,7 +21,6 @@ MULTI_CONF = True
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_ID): cv.declare_id(BuzzerComponent),
-        # Using standard output pin schema lets user simply write: pin: GPIO2
         cv.Required(CONF_PIN): pins.gpio_output_pin_schema,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -78,5 +78,14 @@ async def buzzer_start_to_code(config, action_id, template_arg, args):
     cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
 )
 async def buzzer_stop_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+@automation.register_action(
+    "buzzer.key_beep",
+    KeyBeepAction,
+    cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
+)
+async def buzzer_key_beep_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, parent)
