@@ -7,38 +7,16 @@
 #include <vector>
 #include <string>
 
-#ifdef USE_ESP32  // Ensure only built on ESP32 targets
+#ifdef USE_ESP32
 
 namespace esphome {
 namespace argb_strip {
-
-class ARGBStripComponent;
-
-class ARGBStripOutput : public output::FloatOutput, public Component {
- public:
-  void set_parent(ARGBStripComponent *p) { parent_ = p; }
-  void set_group_name(const std::string &g) { group_ = g; }
-  void set_channel(uint8_t ch) { channel_ = ch; }
-
-  void setup() override {}
-  void dump_config() override {}
-
- protected:
-  void write_state(float state) override;
-
-  ARGBStripComponent *parent_{nullptr};
-  std::string group_;
-  uint8_t channel_{0};  // 0=R,1=G,2=B
-};
 
 class ARGBStripComponent : public Component {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_num_leds(uint16_t n) { num_leds_ = n; }
-
-  void add_group(const std::string &name, const std::vector<int> &leds) {
-    groups_[name] = leds;
-  }
+  void add_group(const std::string &name, const std::vector<int> &leds) { groups_[name] = leds; }
 
   const std::vector<int> *get_group(const std::string &name) const {
     auto it = groups_.find(name);
@@ -50,20 +28,44 @@ class ARGBStripComponent : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
+  // Update one color channel (0=R,1=G,2=B) across all LEDs in a group.
   void update_group_channel(const std::string &group, uint8_t channel, uint8_t value);
 
  protected:
   GPIOPin *pin_{nullptr};
   uint16_t num_leds_{0};
   std::map<std::string, std::vector<int>> groups_;
-  std::vector<uint8_t> buffer_;  // GRB per LED
+  std::vector<uint8_t> buffer_;  // GRB packed (G,R,B per LED)
 
-  // RMT
+  // RMT transmission
   bool rmt_ok_{false};
   int rmt_channel_{0};
 
-  void send_();
   void init_rmt_();
+  void send_();
+};
+
+class ARGBStripOutput : public output::FloatOutput, public Component {
+ public:
+  void set_parent(ARGBStripComponent *p) { parent_ = p; }
+  void set_group_name(const std::string &g) { group_ = g; }
+  void set_channel(uint8_t ch) { channel_ = ch; }
+
+  void setup() override {}
+  void dump_config() override {}
+
+ protected:
+  void write_state(float state) override {
+    if (!parent_) return;
+    if (state < 0.f) state = 0.f;
+    if (state > 1.f) state = 1.f;
+    uint8_t v = static_cast<uint8_t>(state * 255.0f + 0.5f);
+    parent_->update_group_channel(group_, channel_, v);
+  }
+
+  ARGBStripComponent *parent_{nullptr};
+  std::string group_;
+  uint8_t channel_{0};  // 0=R,1=G,2=B
 };
 
 }  // namespace argb_strip
