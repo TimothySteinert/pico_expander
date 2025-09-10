@@ -11,6 +11,10 @@
 #endif
 
 #ifdef USE_ESP32
+
+static int g_argb_instances = 0;
+static const uint32_t ARGB_BUILD_SIG = 0xA312FE47;  // change if you want to be 100% sure you reflashed
+
 namespace esphome {
 namespace argb_strip {
 
@@ -46,6 +50,9 @@ uint8_t ARGBStripComponent::scale_group_value_(const std::string &group, uint8_t
 
 // ---------------- Lifecycle ----------------
 void ARGBStripComponent::setup() {
+int inst = ++g_argb_instances;
+ESP_LOGI(TAG, "ARGB instance #%d begin setup, build_sig=0x%08X", inst, ARGB_BUILD_SIG);
+
   ESP_LOGCONFIG(TAG, "ARGB Strip v%s (flash off-phase + graceful disable)", ARGB_STRIP_VERSION);
   if (!pin_ || raw_gpio_ < 0) {
     ESP_LOGE(TAG, "Invalid pin configuration");
@@ -60,6 +67,7 @@ void ARGBStripComponent::setup() {
   last_sent_grb_.assign(num_leds_ * 3, 255);
 
   init_rmt_();
+  ESP_LOGI(TAG, "ARGB instance #%d configured RMT pin = %d  (arm_mode=%d)", inst, raw_gpio_, (int)arm_select_mode_);
   if (!rmt_ready_) {
     ESP_LOGE(TAG, "RMT init failed");
     this->mark_failed();
@@ -74,6 +82,10 @@ void ARGBStripComponent::setup() {
   rainbow_start_ms_ = millis();
   rfid_transition_ = RfidTransitionState::INACTIVE;
   mark_dirty_();
+
+  if (g_argb_instances > 1) {
+  ESP_LOGE(TAG, "FATAL: More than one ARGBStripComponent instance (%d). Aborting to prove duplicate.", g_argb_instances);
+  abort();
 }
 
 void ARGBStripComponent::dump_config() {
