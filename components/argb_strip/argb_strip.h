@@ -12,7 +12,7 @@
 #ifdef USE_ESP32
 #include "esp_idf_version.h"
 #if ESP_IDF_VERSION_MAJOR < 5
-#error "argb_strip 0.5.2-fade requires ESP-IDF v5+ (new RMT APIs)."
+#error "argb_strip 0.5.3-flashoff requires ESP-IDF v5+ (new RMT APIs)."
 #endif
 
 #include "driver/rmt_tx.h"
@@ -21,7 +21,7 @@
 namespace esphome {
 namespace argb_strip {
 
-static const char *const ARGB_STRIP_VERSION = "0.5.2-fade+patch";
+static const char *const ARGB_STRIP_VERSION = "0.5.3-flashoff";
 
 enum class StripMode : uint8_t {
   NORMAL = 0,
@@ -86,6 +86,9 @@ class ARGBStripComponent : public Component {
   StripMode strip_mode_{StripMode::NORMAL};
   ArmSelectMode arm_select_mode_{ArmSelectMode::NONE};
 
+  // If true, we requested NONE but are waiting for flash OFF phase to finalize
+  bool arm_select_disable_pending_{false};
+
   RfidTransitionState rfid_transition_{RfidTransitionState::INACTIVE};
   uint32_t rfid_transition_start_ms_{0};
   static constexpr uint32_t RFID_FADE_MS = 500;
@@ -129,6 +132,9 @@ class ARGBStripComponent : public Component {
   float current_rfid_fade_factor_() const;
   void finish_rfid_fade_out_();
   void apply_pending_for_group_(const std::string &group);
+
+  // New: finalize pending disable when OFF phase reached
+  void finalize_arm_select_disable_();
 
   void hsv_to_grb_(float h, float s, float v, uint8_t &g, uint8_t &r, uint8_t &b) const;
 };
