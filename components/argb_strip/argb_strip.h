@@ -2,6 +2,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/components/output/float_output.h"
+#include "esphome/core/gpio.h"   // Ensure full GPIOPin declaration
 
 #include <map>
 #include <vector>
@@ -35,14 +36,15 @@ class ARGBStripComponent : public Component {
   GPIOPin *pin_{nullptr};
   uint16_t num_leds_{0};
   std::map<std::string, std::vector<int>> groups_;
-  std::vector<uint8_t> buffer_;  // GRB packed (G,R,B per LED)
+  std::vector<uint8_t> buffer_;  // GRB per LED
 
-  // RMT transmission
+  // RMT state
   bool rmt_ok_{false};
   int rmt_channel_{0};
 
   void init_rmt_();
   void send_();
+  int resolve_gpio_num_() const;  // helper
 };
 
 class ARGBStripOutput : public output::FloatOutput, public Component {
@@ -55,13 +57,7 @@ class ARGBStripOutput : public output::FloatOutput, public Component {
   void dump_config() override {}
 
  protected:
-  void write_state(float state) override {
-    if (!parent_) return;
-    if (state < 0.f) state = 0.f;
-    if (state > 1.f) state = 1.f;
-    uint8_t v = static_cast<uint8_t>(state * 255.0f + 0.5f);
-    parent_->update_group_channel(group_, channel_, v);
-  }
+  void write_state(float state) override;  // implemented in .cpp
 
   ARGBStripComponent *parent_{nullptr};
   std::string group_;
