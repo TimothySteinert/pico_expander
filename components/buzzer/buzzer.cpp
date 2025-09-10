@@ -1,4 +1,5 @@
 #include "buzzer.h"
+#include "switch/buzzer_mute_switch.h"   // Needed for full definition of BuzzerMuteSwitch
 #include "esphome/core/log.h"
 #include "esp_timer.h"
 
@@ -8,7 +9,7 @@ namespace buzzer {
 static const char *const TAG = "buzzer";
 
 static inline uint32_t now_ms() {
-  return (uint32_t) (esp_timer_get_time() / 1000ULL);
+  return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
 void BuzzerComponent::setup() {
@@ -16,7 +17,6 @@ void BuzzerComponent::setup() {
     this->pin_->setup();
     this->pin_->digital_write(false);
   }
-  // Ensure switches (if any) reflect stored flags
   this->update_mute_switch_states();
 }
 
@@ -78,15 +78,6 @@ void BuzzerComponent::loop() {
     apply_value_(tone_);
     beep_on_ = true;
     current_interval_ = beep_length_;
-  }
-}
-
-void BuzzerComponent::update_mute_switch_states() {
-  if (this->tone_switch_ != nullptr) {
-    this->tone_switch_->sync_from_parent();
-  }
-  if (this->beep_switch_ != nullptr) {
-    this->beep_switch_->sync_from_parent();
   }
 }
 
@@ -211,7 +202,9 @@ void BuzzerComponent::refresh_output_() {
 }
 
 void BuzzerComponent::update_mute_switch_states() {
-  // Implemented in switch platform via publish_state; defined there.
+  // Now safe: we have the full class definition from buzzer_mute_switch.h
+  if (this->tone_switch_ != nullptr) this->tone_switch_->sync_from_parent();
+  if (this->beep_switch_ != nullptr) this->beep_switch_->sync_from_parent();
 }
 
 }  // namespace buzzer
