@@ -7,15 +7,27 @@ namespace buzzer {
 
 static const char *const TAG = "buzzer";
 
+static inline uint32_t now_ms() {
+  return (uint32_t) (esp_timer_get_time() / 1000ULL);
+}
+
 void BuzzerComponent::loop() {
+  uint32_t now = now_ms();
+
+  // Key beep expiration check
+  if (this->key_beep_active_ && now >= this->key_beep_end_) {
+    this->key_beep_active_ = false;
+    this->refresh_output_();
+    ESP_LOGV(TAG, "Key beep ended");
+  }
+
   if (!running_) return;
 
-  uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
   if (now - last_tick_ < current_interval_) return;
   last_tick_ = now;
 
   if (beep_on_) {
-    // Turn OFF
+    // Turn OFF pattern
     apply_value_(0);
     beep_on_ = false;
     beeps_done_++;
@@ -30,7 +42,7 @@ void BuzzerComponent::loop() {
       current_interval_ = short_pause_;
     }
   } else {
-    // Turn ON
+    // Turn ON pattern
     apply_value_(tone_);
     beep_on_ = true;
     current_interval_ = beep_length_;
@@ -48,13 +60,13 @@ void BuzzerComponent::start(uint8_t beeps, uint32_t short_pause, uint32_t long_p
   this->beeps_done_ = 0;
   this->beep_on_ = false;
   this->running_ = true;
-  this->last_tick_ = (uint32_t)(esp_timer_get_time() / 1000ULL);
-  this->current_interval_ = 0;
+  this->last_tick_ = now_ms();
+  this->current_interval_ = 0;  // Immediate start on next loop tick
 
   if (beeps == 0 && !repeat) {
     this->running_ = false;
     apply_value_(0);
-    ESP_LOGD(TAG, "Start called with 0 beeps and no repeat; nothing to play.");
+    ESP_LOGD(TAG, "Start with 0 beeps & no repeat: nothing to do");
     return;
   }
 
@@ -64,15 +76,30 @@ void BuzzerComponent::start(uint8_t beeps, uint32_t short_pause, uint32_t long_p
 
 void BuzzerComponent::stop() {
   this->running_ = false;
+  this->beep_on_ = false;
   apply_value_(0);
   ESP_LOGD(TAG, "Stopped");
 }
 
+void BuzzerComponent::key_beep() {
+  uint32_t now = now_ms();
+  this->key_beep_active_ = true;
+  this->key_beep_end_ = now + KEY_BEEP_LEN_MS;
+  this->refresh_output_();
+  ESP_LOGV(TAG, "Key beep start (50ms)");
+}
+
 void BuzzerComponent::apply_value_(uint8_t value) {
+  this->pattern_output_high_ = (value != 0);
+  this->refresh_output_();
+  ESP_LOGV(TAG, "Pattern output=%s", this->pattern_output_high_ ? "HIGH" : "LOW");
+}
+
+void BuzzerComponent::refresh_output_() {
   if (this->pin_ != nullptr) {
-    this->pin_->digital_write(value != 0);
+    bool final_level = this->pattern_output_high_ || this->key_beep_active_;
+    this->pin_->digital_write(final_level);
   }
-  ESP_LOGV(TAG, "GPIO write: %s", value != 0 ? "HIGH" : "LOW");
 }
 
 }  // namespace buzzer
