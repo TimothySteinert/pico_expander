@@ -10,16 +10,9 @@
 #include <cstdint>
 
 namespace esphome {
-namespace k1_uart {
+namespace buzzer { class BuzzerComponent; }  // forward declaration
 
-/*
-  K1UartComponent
-  - Hard-coded UART1 (TX=GPIO33, RX=GPIO32) 115200 8N1
-  - Parses simple framed messages by leading ID byte:
-        0xA0 -> fixed 21-byte frame (including ID)  (log all 21 bytes on ONE line)
-        0xA1 -> fixed 2-byte frame  (ID + 1 data byte)
-    Unknown ID: log single byte and advance (so we don't get stuck)
-*/
+namespace k1_uart {
 
 class K1UartComponent : public Component {
  public:
@@ -30,6 +23,8 @@ class K1UartComponent : public Component {
   float get_setup_priority() const override {
     return setup_priority::HARDWARE;
   }
+
+  void set_buzzer(esphome::buzzer::BuzzerComponent *b) { buzzer_ = b; }
 
  protected:
 #ifdef USE_ESP32
@@ -42,13 +37,20 @@ class K1UartComponent : public Component {
   static constexpr int PIN_RX = 32;
   static constexpr int READ_CHUNK = 128;
 
-  // Ring buffer for incremental parsing
+  // Ring buffer
   static constexpr size_t RING_CAP = 256;
   std::array<uint8_t, RING_CAP> ring_{};
-  size_t ring_head_{0}; // write
-  size_t ring_tail_{0}; // read
+  size_t ring_head_{0};
+  size_t ring_tail_{0};
   bool ring_full_{false};
 
+  // IDs and lengths
+  static constexpr uint8_t ID_A0 = 0xA0;
+  static constexpr uint8_t ID_A1 = 0xA1;
+  static constexpr size_t LEN_A0 = 21;
+  static constexpr size_t LEN_A1 = 2;
+
+  // Helpers
   void push_byte_(uint8_t b);
   bool available_() const;
   size_t size_() const;
@@ -56,12 +58,9 @@ class K1UartComponent : public Component {
   void pop_(size_t n);
   void parse_frames_();
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
-
-  static constexpr uint8_t ID_A0 = 0xA0;
-  static constexpr uint8_t ID_A1 = 0xA1;
-  static constexpr size_t LEN_A0 = 21;
-  static constexpr size_t LEN_A1 = 2;
 #endif
+
+  esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
 };
 
 }  // namespace k1_uart
