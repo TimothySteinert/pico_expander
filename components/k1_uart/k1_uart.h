@@ -9,34 +9,23 @@
 namespace esphome {
 namespace k1_uart {
 
-/*
-  K1UartComponent
-  - Hard-coded UART on ESP32:
-      Port: UART1
-      TX: GPIO33
-      RX: GPIO32
-      Baud: 115200 8N1
-  - Reads any incoming bytes and logs them in hex (& printable ASCII)
-  - No user configuration exposed (schema only provides an id)
-*/
-
 class K1UartComponent : public Component {
  public:
   void setup() override;
   void loop() override;
   void dump_config() override;
 
+  // Changed: use HARDWARE (or remove this method)
   float get_setup_priority() const override {
-    // After hardware is fine; standard priority OK.
-    return setup_priority::HARDWARE_LATE;
+    return setup_priority::HARDWARE;
   }
 
  protected:
 #ifdef USE_ESP32
   static constexpr uart_port_t UART_PORT = UART_NUM_1;
   static constexpr int RX_BUF_SIZE = 1024;
-  static constexpr int TX_BUF_SIZE = 0;     // We only receive for now
-  static constexpr int QUEUE_SIZE = 0;      // No event queue yet
+  static constexpr int TX_BUF_SIZE = 0;
+  static constexpr int QUEUE_SIZE = 0;
   static constexpr int BAUD = 115200;
   static constexpr int PIN_TX = 33;
   static constexpr int PIN_RX = 32;
