@@ -12,8 +12,9 @@
 
 #ifdef USE_ESP32
 
+// Global diagnostic counters (file static)
 static int g_argb_instances = 0;
-static const uint32_t ARGB_BUILD_SIG = 0xA312FE47;  // change if you want to be 100% sure you reflashed
+static const uint32_t ARGB_BUILD_SIG = 0xA312FE47;
 
 namespace esphome {
 namespace argb_strip {
@@ -37,7 +38,7 @@ const std::vector<int> *ARGBStripComponent::get_group(const std::string &name) c
 }
 float ARGBStripComponent::get_group_max(const std::string &name) const {
   auto it = group_max_.find(name);
-  if (it == group_max_.end())  // FIX: was groups_.end()
+  if (it == group_max_.end())
     return 1.0f;
   return it->second;
 }
@@ -50,10 +51,10 @@ uint8_t ARGBStripComponent::scale_group_value_(const std::string &group, uint8_t
 
 // ---------------- Lifecycle ----------------
 void ARGBStripComponent::setup() {
-int inst = ++g_argb_instances;
-ESP_LOGI(TAG, "ARGB instance #%d begin setup, build_sig=0x%08X", inst, ARGB_BUILD_SIG);
+  int inst = ++g_argb_instances;
+  ESP_LOGI(TAG, "ARGB instance #%d begin setup, build_sig=0x%08X", inst, ARGB_BUILD_SIG);
 
-  ESP_LOGCONFIG(TAG, "ARGB Strip v%s (flash off-phase + graceful disable)", ARGB_STRIP_VERSION);
+  ESP_LOGCONFIG(TAG, "ARGB Strip v%s (diag)", ARGB_STRIP_VERSION);
   if (!pin_ || raw_gpio_ < 0) {
     ESP_LOGE(TAG, "Invalid pin configuration");
     this->mark_failed();
@@ -67,7 +68,7 @@ ESP_LOGI(TAG, "ARGB instance #%d begin setup, build_sig=0x%08X", inst, ARGB_BUIL
   last_sent_grb_.assign(num_leds_ * 3, 255);
 
   init_rmt_();
-  ESP_LOGI(TAG, "ARGB instance #%d configured RMT pin = %d  (arm_mode=%d)", inst, raw_gpio_, (int)arm_select_mode_);
+  ESP_LOGI(TAG, "ARGB instance #%d configured RMT pin = %d", inst, raw_gpio_);
   if (!rmt_ready_) {
     ESP_LOGE(TAG, "RMT init failed");
     this->mark_failed();
@@ -83,9 +84,16 @@ ESP_LOGI(TAG, "ARGB instance #%d begin setup, build_sig=0x%08X", inst, ARGB_BUIL
   rfid_transition_ = RfidTransitionState::INACTIVE;
   mark_dirty_();
 
+  // Optional: slam GPIO4 low to prove nothing should drive it
+  gpio_reset_pin((gpio_num_t)4);
+  gpio_set_direction((gpio_num_t)4, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)4, 0);
+  ESP_LOGI(TAG, "Diagnostic: forced GPIO4 low (should stop any mirror if only one instance).");
+
   if (g_argb_instances > 1) {
-  ESP_LOGE(TAG, "FATAL: More than one ARGBStripComponent instance (%d). Aborting to prove duplicate.", g_argb_instances);
-  abort();
+    ESP_LOGE(TAG, "FATAL: More than one ARGBStripComponent instance (%d). Aborting for proof.", g_argb_instances);
+    abort();
+  }
 }
 
 void ARGBStripComponent::dump_config() {
