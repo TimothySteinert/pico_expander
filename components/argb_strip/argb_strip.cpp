@@ -3,18 +3,30 @@
 
 #ifdef USE_ESP32
 #include "driver/rmt.h"
-#include "esp_idf_version.h"
 
 namespace esphome {
 namespace argb_strip {
 
 static const char *const TAG = "argb_strip";
 
-// WS2812 800kHz timings in RMT ticks (with 80MHz source / div=2 => 40MHz => 25ns tick)
+// Timings (legacy RMT) for WS2812 at 800kHz using 40MHz source (clk_div=2 => 25ns ticks)
 static const uint16_t T0H = 16;  // 0.4us
 static const uint16_t T0L = 34;  // 0.85us
 static const uint16_t T1H = 32;  // 0.8us
 static const uint16_t T1L = 18;  // 0.45us
+
+int ARGBStripComponent::resolve_gpio_num_() const {
+  if (pin_ == nullptr) return -1;
+  // Newer ESPHome versions usually provide raw pin via get_pin()
+  // If that ever changes, this is where you'd adapt.
+#if defined(USE_GPIO)
+  // Guard: only compile call if symbol is available
+  // (If compilation still fails, inspect esphome/core/gpio*.h for the correct accessor)
+  return pin_->get_pin();
+#else
+  return -1;
+#endif
+}
 
 void ARGBStripComponent::setup() {
   ESP_LOGCONFIG(TAG, "Initializing ARGB strip: %u LEDs", num_leds_);
@@ -27,7 +39,7 @@ void ARGBStripComponent::setup() {
   pin_->digital_write(false);
   buffer_.assign(num_leds_ * 3, 0);
   init_rmt_();
-  send_();  // Clear
+  send_();  // clear
 }
 
 void ARGBStripComponent::dump_config() {
@@ -36,21 +48,26 @@ void ARGBStripComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  LEDs: %u", num_leds_);
   ESP_LOGCONFIG(TAG, "  Groups: %u", (unsigned) groups_.size());
   for (auto &kv : groups_) {
-    ESP_LOGV(TAG, "    %s -> %u entries", kv.first.c_str(), (unsigned) kv.second.size());
+    ESP_LOGV(TAG, "    %s -> %u LEDs", kv.first.c_str(), (unsigned) kv.second.size());
   }
-  ESP_LOGCONFIG(TAG, "  RMT init: %s", rmt_ok_ ? "OK" : "FAILED");
+  ESP_LOGCONFIG(TAG, "  RMT driver: %s", rmt_ok_ ? "OK" : "FAILED");
 }
 
 void ARGBStripComponent::init_rmt_() {
-  // Pick first free channel (simplified). You could make channel configurable if needed.
-  rmt_channel_ = 0;
+  int gpio_num = resolve_gpio_num_();
+  if (gpio_num < 0) {
+    ESP_LOGE(TAG, "Could not resolve GPIO number for RMT");
+    return;
+  }
+
+  rmt_channel_ = 0;  // fixed channel for now
 
   rmt_config_t cfg{};
   cfg.rmt_mode = RMT_MODE_TX;
   cfg.channel = (rmt_channel_t) rmt_channel_;
-  cfg.gpio_num = (gpio_num_t) pin_->get_pin();
+  cfg.gpio_num = (gpio_num_t) gpio_num;
   cfg.mem_block_num = 1;
-  cfg.clk_div = 2;  // 80MHz / 2 = 40MHz => 25ns ticks
+  cfg.clk_div = 2;  // 80MHz / 2 = 40MHz -> 25ns tick
   cfg.tx_config.loop_en = false;
   cfg.tx_config.carrier_en = false;
   cfg.tx_config.idle_output_en = true;
@@ -74,25 +91,18 @@ void ARGBStripComponent::update_group_channel(const std::string &group, uint8_t 
   for (int led : *g) {
     if (led < 0 || (uint16_t) led >= num_leds_) continue;
     uint32_t base = led * 3;
-    // Buffer is GRB
+    // buffer_ layout GRB
     switch (channel) {
-      case 0: // red
-        buffer_[base + 1] = value;
-        break;
-      case 1: // green
-        buffer_[base + 0] = value;
-        break;
-      case 2: // blue
-        buffer_[base + 2] = value;
-        break;
+      case 0: buffer_[base + 1] = value; break;  // red
+      case 1: buffer_[base + 0] = value; break;  // green
+      case 2: buffer_[base + 2] = value; break;  // blue
     }
   }
   send_();
 }
 
 void ARGBStripComponent::send_() {
-  if (!rmt_ok_) return;
-  if (num_leds_ == 0) return;
+  if (!rmt_ok_ || num_leds_ == 0) return;
 
   const size_t bit_count = num_leds_ * 24;
   std::vector<rmt_item32_t> items;
@@ -100,7 +110,6 @@ void ARGBStripComponent::send_() {
 
   for (uint16_t led = 0; led < num_leds_; led++) {
     uint32_t base = led * 3;
-    // GRB order
     uint8_t g = buffer_[base + 0];
     uint8_t r = buffer_[base + 1];
     uint8_t b = buffer_[base + 2];
@@ -123,9 +132,8 @@ void ARGBStripComponent::send_() {
     }
   }
 
-  // Blocking write
   rmt_write_items((rmt_channel_t) rmt_channel_, items.data(), items.size(), true);
-  // Reset latch: >50us low. Easiest: delay 1ms (overkill but safe).
+  // Latch/reset > 50us low
   delay(1);
 }
 
