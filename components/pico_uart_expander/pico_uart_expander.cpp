@@ -1,5 +1,6 @@
 #include "pico_uart_expander.h"
 #include "esphome/core/log.h"
+#include "driver/uart.h"
 
 namespace esphome {
 namespace pico_uart_expander {
@@ -10,10 +11,17 @@ void PicoUartExpanderComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up PicoUartExpander UART device...");
   // Initialize all data bytes to 0
   memset(data_bytes_, 0, sizeof(data_bytes_));
+  
+  // Get the UART port number from the parent component
+  auto *idf_uart = static_cast<uart::IDFUARTComponent*>(this->parent_);
+  uart_num_ = static_cast<uart_port_t>(idf_uart->get_hw_serial_number());
+  
+  ESP_LOGD(TAG, "Using UART port %d", uart_num_);
 }
 
 void PicoUartExpanderComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "PicoUartExpander (UART LED driver)");
+  ESP_LOGCONFIG(TAG, "  UART Port: %d", uart_num_);
   this->check_uart_settings(115200);
   if (this->is_failed()) {
     ESP_LOGE(TAG, "Communication with PicoUartExpander failed!");
@@ -44,17 +52,24 @@ void PicoUartExpanderComponent::send_uart_message() {
   message[0] = 0xB0;  // ID byte
   
   // Copy all 16 data bytes
-  for (int i = 0; i < 16; i++) {
-    message[i + 1] = data_bytes_[i];
+  memcpy(&message[1], data_bytes_, 16);
+  
+  // Use native ESP32 IDF UART function for guaranteed atomic transmission
+  int bytes_written = uart_write_bytes(uart_num_, message, 17);
+  
+  // Wait for transmission to complete before returning
+  esp_err_t err = uart_wait_tx_done(uart_num_, pdMS_TO_TICKS(100));
+  
+  if (bytes_written != 17) {
+    ESP_LOGE(TAG, "Failed to write complete message: wrote %d of 17 bytes", bytes_written);
+  } else if (err != ESP_OK) {
+    ESP_LOGE(TAG, "UART transmission failed: %s", esp_err_to_name(err));
+  } else {
+    ESP_LOGD(TAG, "Complete UART message sent atomically: 17 bytes");
   }
   
-  // Send as one atomic write operation
-  this->write_array(message, 17);
-  
-  // Force immediate transmission
-  this->flush();
-  
-  ESP_LOGD(TAG, "UART message sent (17 bytes): %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", 
+  // Debug log the complete message
+  ESP_LOGD(TAG, "TX: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", 
            message[0], message[1], message[2], message[3], message[4], message[5], message[6], message[7], message[8], 
            message[9], message[10], message[11], message[12], message[13], message[14], message[15], message[16]);
 }
