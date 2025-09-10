@@ -2,7 +2,9 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/components/uart/uart_component_esp_idf.h"
 #include "esphome/components/output/float_output.h"
+#include "driver/uart.h"
 
 namespace esphome {
 namespace pico_uart_expander {
@@ -20,6 +22,7 @@ class PicoUartExpanderComponent : public Component, public uart::UARTDevice {
   void send_uart_message();
   
   uint8_t data_bytes_[16] = {0};  // 15 LED channels + 1 buzzer channel
+  uart_port_t uart_num_;          // ESP32 UART port number
 };
 
 /** Output: maps 0.0–1.0 float → 0x00–0xFF, writes one byte to data array. */
