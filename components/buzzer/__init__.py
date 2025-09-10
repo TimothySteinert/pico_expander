@@ -15,17 +15,19 @@ CONF_TONE = "tone"
 CONF_REPEAT = "repeat"
 CONF_BEEP_LENGTH = "beep_length"
 
+MULTI_CONF = True
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_ID): cv.declare_id(BuzzerComponent),
+        # Using standard output pin schema lets user simply write: pin: GPIO2
         cv.Required(CONF_PIN): pins.gpio_output_pin_schema,
     }
-)
+).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-
     pin = await cg.gpio_pin_expression(config[CONF_PIN])
     cg.add(var.set_pin(pin))
 
