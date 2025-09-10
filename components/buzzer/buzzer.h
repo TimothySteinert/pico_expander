@@ -26,19 +26,17 @@ class BuzzerComponent : public Component {
 
   void key_beep();
 
-  // Mute controls
+  // Mutes
   void tone_mute();
   void tone_unmute();
   void beep_mute();
   void beep_unmute();
 
   bool is_running() const { return this->running_; }
-  bool is_tone_muted() const { return this->tone_muted_; }
-  bool is_beep_muted() const { return this->beep_muted_; }
 
  protected:
-  void apply_value_(uint8_t value);   // Adjusts pattern logical output
-  void refresh_output_();             // Applies combined (pattern + key beep) minus mutes
+  void apply_value_(uint8_t value);
+  void refresh_output_();
 
   GPIOPin *pin_{nullptr};
 
@@ -55,7 +53,7 @@ class BuzzerComponent : public Component {
   uint32_t current_interval_{0};
   uint32_t last_tick_{0};
 
-  // Pattern logical (pre-mute)
+  // Pattern logical output (pre-mute)
   bool pattern_output_high_{false};
 
   // Key beep overlay
@@ -63,12 +61,19 @@ class BuzzerComponent : public Component {
   uint32_t key_beep_end_{0};
   static constexpr uint32_t KEY_BEEP_LEN_MS = 50;
 
+  // Retrigger enhancement
+  static constexpr bool KEY_BEEP_RETRIGGER_MODE = true;  // set false to revert to old behavior
+  static constexpr uint32_t KEY_BEEP_GAP_MS = 8;         // LOW gap between queued pulses
+  uint8_t key_beep_pending_{0};        // how many queued pulses waiting
+  bool key_beep_gap_phase_{false};     // currently in LOW gap before next pulse
+  uint32_t key_beep_next_start_{0};    // when to start the next queued pulse after gap
+
   // Mute flags
   bool tone_muted_{false};
   bool beep_muted_{false};
 };
 
-// ---- Actions ----
+// ---- Actions (unchanged) ----
 template<typename... Ts> class StartAction : public Action<Ts...> {
  public:
   explicit StartAction(BuzzerComponent *parent) : parent_(parent) {}
@@ -106,7 +111,6 @@ template<typename... Ts> class KeyBeepAction : public Action<Ts...> {
   BuzzerComponent *parent_;
 };
 
-// Mute/unmute actions
 template<typename... Ts> class ToneMuteAction : public Action<Ts...> {
  public:
   explicit ToneMuteAction(BuzzerComponent *parent) : parent_(parent) {}
