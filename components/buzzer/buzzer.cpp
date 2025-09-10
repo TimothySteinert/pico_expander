@@ -8,7 +8,7 @@ namespace buzzer {
 static const char *const TAG = "buzzer";
 
 static inline uint32_t now_ms() {
-  return (uint32_t) (esp_timer_get_time() / 1000ULL);
+  return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
 void BuzzerComponent::loop() {
@@ -16,9 +16,8 @@ void BuzzerComponent::loop() {
 
   // Key beep state machine (retrigger mode)
   if (KEY_BEEP_RETRIGGER_MODE) {
-    // Handle gap phase (LOW)
+    // Handle gap (LOW) phase
     if (this->key_beep_gap_phase_ && now >= this->key_beep_next_start_) {
-      // Start next queued pulse
       if (this->key_beep_pending_ > 0) {
         this->key_beep_pending_--;
         this->key_beep_gap_phase_ = false;
@@ -27,16 +26,14 @@ void BuzzerComponent::loop() {
         ESP_LOGV(TAG, "Key beep queued pulse start");
         this->refresh_output_();
       } else {
-        // No pulses queued; end gap
         this->key_beep_gap_phase_ = false;
+        this->refresh_output_();
       }
     }
-
-    // Handle active pulse
+    // Handle active pulse ending
     if (this->key_beep_active_ && now >= this->key_beep_end_) {
       this->key_beep_active_ = false;
       if (this->key_beep_pending_ > 0) {
-        // Enter gap before next pulse
         this->key_beep_gap_phase_ = true;
         this->key_beep_next_start_ = now + KEY_BEEP_GAP_MS;
       }
@@ -44,7 +41,6 @@ void BuzzerComponent::loop() {
       ESP_LOGV(TAG, "Key beep pulse ended");
     }
   } else {
-    // Original simpler behavior
     if (this->key_beep_active_ && now >= this->key_beep_end_) {
       this->key_beep_active_ = false;
       this->refresh_output_();
@@ -52,7 +48,7 @@ void BuzzerComponent::loop() {
     }
   }
 
-  // Pattern
+  // Pattern timing
   if (!running_) return;
   if (now - last_tick_ < current_interval_) return;
   last_tick_ = now;
@@ -112,22 +108,18 @@ void BuzzerComponent::stop() {
 
 void BuzzerComponent::key_beep() {
   uint32_t now = now_ms();
-
   if (KEY_BEEP_RETRIGGER_MODE) {
-    // If currently active or in gap, queue another pulse
     if (this->key_beep_active_ || this->key_beep_gap_phase_) {
-      if (this->key_beep_pending_ < 10)  // small cap
+      if (this->key_beep_pending_ < 10)
         this->key_beep_pending_++;
       ESP_LOGV(TAG, "Key beep queued (pending=%u)", this->key_beep_pending_);
       return;
     }
-    // Start fresh pulse
     this->key_beep_active_ = true;
     this->key_beep_end_ = now + KEY_BEEP_LEN_MS;
     this->refresh_output_();
     ESP_LOGV(TAG, "Key beep start");
   } else {
-    // Original behavior: extend / restart window
     this->key_beep_active_ = true;
     this->key_beep_end_ = now + KEY_BEEP_LEN_MS;
     this->refresh_output_();
@@ -149,6 +141,7 @@ void BuzzerComponent::tone_unmute() {
     ESP_LOGD(TAG, "Tone unmuted");
   }
 }
+
 void BuzzerComponent::beep_mute() {
   if (!this->beep_muted_) {
     this->beep_muted_ = true;
@@ -164,6 +157,21 @@ void BuzzerComponent::beep_unmute() {
   }
 }
 
+void BuzzerComponent::pinmode_mute() {
+  if (!this->pinmode_muted_) {
+    this->pinmode_muted_ = true;
+    this->refresh_output_();
+    ESP_LOGD(TAG, "Pinmode muted (pattern suppressed while active)");
+  }
+}
+void BuzzerComponent::pinmode_unmute() {
+  if (this->pinmode_muted_) {
+    this->pinmode_muted_ = false;
+    this->refresh_output_();
+    ESP_LOGD(TAG, "Pinmode unmuted");
+  }
+}
+
 void BuzzerComponent::apply_value_(uint8_t value) {
   this->pattern_output_high_ = (value != 0);
   this->refresh_output_();
@@ -172,13 +180,18 @@ void BuzzerComponent::apply_value_(uint8_t value) {
 
 void BuzzerComponent::refresh_output_() {
   if (this->pin_ != nullptr) {
-    bool final_level =
-        (this->pattern_output_high_ && !this->tone_muted_) ||
-        ((this->key_beep_active_ || this->key_beep_gap_phase_) && !this->beep_muted_);
-    // During gap phase we force LOW regardless of pattern part of key beep overlay,
-    // so adjust:
-    if (this->key_beep_gap_phase_)
-      final_level = (this->pattern_output_high_ && !this->tone_muted_);
+    // Pattern audible only if not tone_muted_ AND not pinmode_muted_
+    bool pattern_active = this->pattern_output_high_ && !this->tone_muted_ && !this->pinmode_muted_;
+    // Key beep audible if active (or gap needs LOW) and not beep_muted_
+    bool key_layer_active = (this->key_beep_active_ && !this->beep_muted_);
+
+    bool final_level = pattern_active || key_layer_active;
+
+    // Gap phase forces LOW for key beep pulses, but should still allow pattern if pattern_active
+    if (this->key_beep_gap_phase_) {
+      final_level = pattern_active;  // key beep overlay intentionally suppressed during gap
+    }
+
     this->pin_->digital_write(final_level);
   }
 }
