@@ -8,29 +8,36 @@ namespace buzzer {
 static const char *const TAG = "buzzer";
 
 static inline uint32_t now_ms() {
-  return (uint32_t)(esp_timer_get_time() / 1000ULL);
+  return (uint32_t) (esp_timer_get_time() / 1000ULL);
+}
+
+void BuzzerComponent::setup() {
+  if (this->pin_ != nullptr) {
+    this->pin_->setup();
+    this->pin_->digital_write(false);
+  }
+  // Ensure switches (if any) reflect stored flags
+  this->update_mute_switch_states();
 }
 
 void BuzzerComponent::loop() {
   uint32_t now = now_ms();
 
-  // Key beep state machine (retrigger mode)
+  // Key beep retrigger logic
   if (KEY_BEEP_RETRIGGER_MODE) {
-    // Handle gap (LOW) phase
     if (this->key_beep_gap_phase_ && now >= this->key_beep_next_start_) {
       if (this->key_beep_pending_ > 0) {
         this->key_beep_pending_--;
         this->key_beep_gap_phase_ = false;
         this->key_beep_active_ = true;
         this->key_beep_end_ = now + KEY_BEEP_LEN_MS;
-        ESP_LOGV(TAG, "Key beep queued pulse start");
         this->refresh_output_();
+        ESP_LOGV(TAG, "Key beep queued pulse start");
       } else {
         this->key_beep_gap_phase_ = false;
         this->refresh_output_();
       }
     }
-    // Handle active pulse ending
     if (this->key_beep_active_ && now >= this->key_beep_end_) {
       this->key_beep_active_ = false;
       if (this->key_beep_pending_ > 0) {
@@ -95,7 +102,7 @@ void BuzzerComponent::start(uint8_t beeps, uint32_t short_pause, uint32_t long_p
     return;
   }
 
-  ESP_LOGD(TAG, "Started: beeps=%u short=%ums long=%ums tone=%u repeat=%d len=%ums",
+  ESP_LOGD(TAG, "Started pattern: beeps=%u short=%ums long=%ums tone=%u repeat=%d len=%ums",
            beeps, short_pause, long_pause, tone, repeat, beep_length);
 }
 
@@ -103,7 +110,7 @@ void BuzzerComponent::stop() {
   this->running_ = false;
   this->beep_on_ = false;
   apply_value_(0);
-  ESP_LOGD(TAG, "Stopped");
+  ESP_LOGD(TAG, "Stopped pattern");
 }
 
 void BuzzerComponent::key_beep() {
@@ -131,6 +138,7 @@ void BuzzerComponent::tone_mute() {
   if (!this->tone_muted_) {
     this->tone_muted_ = true;
     this->refresh_output_();
+    this->update_mute_switch_states();
     ESP_LOGD(TAG, "Tone muted");
   }
 }
@@ -138,6 +146,7 @@ void BuzzerComponent::tone_unmute() {
   if (this->tone_muted_) {
     this->tone_muted_ = false;
     this->refresh_output_();
+    this->update_mute_switch_states();
     ESP_LOGD(TAG, "Tone unmuted");
   }
 }
@@ -146,6 +155,7 @@ void BuzzerComponent::beep_mute() {
   if (!this->beep_muted_) {
     this->beep_muted_ = true;
     this->refresh_output_();
+    this->update_mute_switch_states();
     ESP_LOGD(TAG, "Key beeps muted");
   }
 }
@@ -153,6 +163,7 @@ void BuzzerComponent::beep_unmute() {
   if (this->beep_muted_) {
     this->beep_muted_ = false;
     this->refresh_output_();
+    this->update_mute_switch_states();
     ESP_LOGD(TAG, "Key beeps unmuted");
   }
 }
@@ -161,7 +172,7 @@ void BuzzerComponent::pinmode_mute() {
   if (!this->pinmode_muted_) {
     this->pinmode_muted_ = true;
     this->refresh_output_();
-    ESP_LOGD(TAG, "Pinmode muted (pattern suppressed while active)");
+    ESP_LOGD(TAG, "Pinmode muted");
   }
 }
 void BuzzerComponent::pinmode_unmute() {
@@ -180,20 +191,18 @@ void BuzzerComponent::apply_value_(uint8_t value) {
 
 void BuzzerComponent::refresh_output_() {
   if (this->pin_ != nullptr) {
-    // Pattern audible only if not tone_muted_ AND not pinmode_muted_
     bool pattern_active = this->pattern_output_high_ && !this->tone_muted_ && !this->pinmode_muted_;
-    // Key beep audible if active (or gap needs LOW) and not beep_muted_
     bool key_layer_active = (this->key_beep_active_ && !this->beep_muted_);
-
     bool final_level = pattern_active || key_layer_active;
-
-    // Gap phase forces LOW for key beep pulses, but should still allow pattern if pattern_active
     if (this->key_beep_gap_phase_) {
-      final_level = pattern_active;  // key beep overlay intentionally suppressed during gap
+      final_level = pattern_active;  // gap suppresses key layer
     }
-
     this->pin_->digital_write(final_level);
   }
+}
+
+void BuzzerComponent::update_mute_switch_states() {
+  // Implemented in switch platform via publish_state; defined there.
 }
 
 }  // namespace buzzer
