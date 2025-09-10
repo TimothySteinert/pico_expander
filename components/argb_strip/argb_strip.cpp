@@ -84,12 +84,6 @@ void ARGBStripComponent::setup() {
   rfid_transition_ = RfidTransitionState::INACTIVE;
   mark_dirty_();
 
-  // Optional: slam GPIO4 low to prove nothing should drive it
-  gpio_reset_pin((gpio_num_t)4);
-  gpio_set_direction((gpio_num_t)4, GPIO_MODE_OUTPUT);
-  gpio_set_level((gpio_num_t)4, 0);
-  ESP_LOGI(TAG, "Diagnostic: forced GPIO4 low (should stop any mirror if only one instance).");
-
   if (g_argb_instances > 1) {
     ESP_LOGE(TAG, "FATAL: More than one ARGBStripComponent instance (%d). Aborting for proof.", g_argb_instances);
     abort();
