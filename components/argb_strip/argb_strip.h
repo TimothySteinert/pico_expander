@@ -16,6 +16,7 @@ namespace argb_strip {
 class ARGBStripComponent : public Component {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
+  void set_raw_gpio(int raw) { raw_gpio_ = raw; }
   void set_num_leds(uint16_t n) { num_leds_ = n; }
   void add_group(const std::string &name, const std::vector<int> &leds) { groups_[name] = leds; }
 
@@ -33,16 +34,16 @@ class ARGBStripComponent : public Component {
 
  protected:
   GPIOPin *pin_{nullptr};
+  int raw_gpio_{-1};
   uint16_t num_leds_{0};
   std::map<std::string, std::vector<int>> groups_;
-  std::vector<uint8_t> buffer_;  // GRB
+  std::vector<uint8_t> buffer_;  // GRB order
 
   bool rmt_ok_{false};
   int rmt_channel_{0};
 
   void init_rmt_();
   void send_();
-  int resolve_gpio_num_() const;
 };
 
 class ARGBStripOutput : public output::FloatOutput, public Component {
@@ -59,7 +60,7 @@ class ARGBStripOutput : public output::FloatOutput, public Component {
 
   ARGBStripComponent *parent_{nullptr};
   std::string group_;
-  uint8_t channel_{0};
+  uint8_t channel_{0};  // 0=R,1=G,2=B
 };
 
 }  // namespace argb_strip
