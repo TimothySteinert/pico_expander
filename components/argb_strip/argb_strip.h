@@ -13,15 +13,16 @@
 #include "esp_idf_version.h"
 
 #if ESP_IDF_VERSION_MAJOR < 5
-#error "argb_strip requires ESP-IDF v5+ (no legacy RMT fallback)."
+#error "argb_strip 0.3.1-rmt requires ESP-IDF v5+ (new RMT APIs)."
 #endif
 
-#include "driver/led_strip.h"
+#include "driver/rmt_tx.h"
+#include "driver/rmt_encoder.h"
 
 namespace esphome {
 namespace argb_strip {
 
-static const char *const ARGB_STRIP_VERSION = "0.3.0-ledstrip";
+static const char *const ARGB_STRIP_VERSION = "0.3.1-rmt";
 
 class ARGBStripComponent : public Component {
  public:
@@ -43,36 +44,45 @@ class ARGBStripComponent : public Component {
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
   void update_group_channel(const std::string &group, uint8_t channel, uint8_t value);
-  void commit() { send_(); }
+  void commit() { send_frame_(); }
 
  protected:
   GPIOPin *pin_{nullptr};
   int raw_gpio_{-1};
   uint16_t num_leds_{0};
+
   std::map<std::string, std::vector<int>> groups_;
 
-  // Internal RGB buffer (R,G,B per LED)
-  std::vector<uint8_t> rgb_;  // size = num_leds_ * 3
+  // Internal GRB buffer (WS2812 expects GRB bit order; we store already in GRB to avoid per-frame shuffle)
+  std::vector<uint8_t> grb_; // size = num_leds_ * 3
 
   // Brightness / gamma
   float global_brightness_{1.0f};
   bool gamma_enabled_{false};
   uint8_t gamma_lut_[256];
   void build_gamma_();
-  inline uint8_t post_(uint8_t v) const {
+  inline uint8_t postprocess(uint8_t v) const {
     if (global_brightness_ < 0.999f)
-      v = (uint8_t) (v * global_brightness_ + 0.5f);
+      v = (uint8_t)(v * global_brightness_ + 0.5f);
     if (gamma_enabled_)
       v = gamma_lut_[v];
     return v;
   }
 
-  // ESP-IDF led_strip driver handle
-  led_strip_handle_t strip_{nullptr};
-  bool ready_{false};
+  // New RMT resources
+  rmt_channel_handle_t tx_channel_{nullptr};
+  rmt_encoder_handle_t bytes_encoder_{nullptr};
+  rmt_encoder_handle_t copy_encoder_{nullptr};
+  bool rmt_ready_{false};
 
-  void init_driver_();
-  void send_();
+  // Reset (latch) symbol
+  rmt_symbol_word_t reset_symbol_{};
+
+  // Transmission config (loop_count=0)
+  rmt_transmit_config_t tx_cfg_{};
+
+  void init_rmt_();
+  void send_frame_();
 };
 
 class ARGBStripOutput : public output::FloatOutput, public Component {
@@ -89,7 +99,7 @@ class ARGBStripOutput : public output::FloatOutput, public Component {
 
   ARGBStripComponent *parent_{nullptr};
   std::string group_;
-  uint8_t channel_{0}; // 0=R 1=G 2=B
+  uint8_t channel_{0}; // 0=R 1=G 2=B (logical) mapped to GRB storage indices: G=0,R=1,B=2
 };
 
 }  // namespace argb_strip
