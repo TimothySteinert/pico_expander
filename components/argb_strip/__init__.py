@@ -27,10 +27,17 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    pin = await cg.gpio_pin_expression(config[CONF_PIN])
-    cg.add(var.set_pin(pin))
+    # Standard ESPHome pin expression (still used for high-level ops, direction, etc.)
+    pin_expr = await cg.gpio_pin_expression(config[CONF_PIN])
+    cg.add(var.set_pin(pin_expr))
+
     num_leds = config[CONF_NUM_LEDS]
     cg.add(var.set_num_leds(num_leds))
+
+    # Extract raw pin number directly from the YAML config
+    # The internal_gpio_output_pin_schema stores it under key 'number'
+    raw_pin_num = config[CONF_PIN]['number']
+    cg.add(var.set_raw_gpio(raw_pin_num))
 
     for name, led_list in config[CONF_GROUPS].items():
         for led in led_list:
