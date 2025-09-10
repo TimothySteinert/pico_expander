@@ -12,16 +12,15 @@
 #ifdef USE_ESP32
 #include "esp_idf_version.h"
 #if ESP_IDF_VERSION_MAJOR < 5
-#error "argb_strip 0.5.3-flashoff requires ESP-IDF v5+ (new RMT APIs)."
+#error "argb_strip version 16 requires ESP-IDF v5+."
 #endif
-
 #include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
 
 namespace esphome {
 namespace argb_strip {
 
-static const char *const ARGB_STRIP_VERSION = "0.5.3-flashoff";
+static const char *const ARGB_STRIP_VERSION = "16";
 
 enum class StripMode : uint8_t {
   NORMAL = 0,
@@ -50,14 +49,14 @@ class ARGBStripComponent : public Component {
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_raw_gpio(int raw) { raw_gpio_ = raw; }
   void set_num_leds(uint16_t n) { num_leds_ = n; }
+  void set_rfid_rainbow_cycle_ms(uint32_t v) { rainbow_cycle_ms_ = v; }
 
-  void add_group(const std::string &name, const std::vector<int> &leds, float max_brightness);
+  void add_group(const std::string &name, const std::vector<int> &leds, uint16_t cap);
   const std::vector<int> *get_group(const std::string &name) const;
-  float get_group_max(const std::string &name) const;
+  uint16_t get_group_cap(const std::string &name) const;
 
   void update_group_channel(const std::string &group, uint8_t channel, uint8_t value);
 
-  // Internal control
   void enable_rfid_mode();
   void disable_rfid_mode();
   void set_arm_select_mode(ArmSelectMode m);
@@ -77,7 +76,7 @@ class ARGBStripComponent : public Component {
   uint16_t num_leds_{0};
 
   std::map<std::string, std::vector<int>> groups_;
-  std::map<std::string, float> group_max_;
+  std::map<std::string, uint16_t> group_caps_;  // 0-255 caps
 
   std::vector<uint8_t> base_raw_grb_;
   std::vector<uint8_t> working_grb_;
@@ -85,23 +84,21 @@ class ARGBStripComponent : public Component {
 
   StripMode strip_mode_{StripMode::NORMAL};
   ArmSelectMode arm_select_mode_{ArmSelectMode::NONE};
-
-  // If true, we requested NONE but are waiting for flash OFF phase to finalize
   bool arm_select_disable_pending_{false};
 
   RfidTransitionState rfid_transition_{RfidTransitionState::INACTIVE};
   uint32_t rfid_transition_start_ms_{0};
   static constexpr uint32_t RFID_FADE_MS = 500;
   uint32_t rainbow_start_ms_{0};
-  static constexpr uint32_t RAINBOW_CYCLE_MS = 8000;
+  uint32_t rainbow_cycle_ms_{8000};  // configurable now
 
   static constexpr uint32_t FLASH_ON_MS = 400;
   static constexpr uint32_t FLASH_OFF_MS = 400;
 
   struct PendingGroup {
     bool used = false;
-    std::array<bool, 3> channel_set{{false,false,false}};
-    std::array<uint8_t, 3> values{{0,0,0}}; // R,G,B logical
+    std::array<bool,3> channel_set{{false,false,false}};
+    std::array<uint8_t,3> values{{0,0,0}};
   };
   std::map<std::string, PendingGroup> pending_writes_;
 
@@ -123,17 +120,15 @@ class ARGBStripComponent : public Component {
   void build_normal_base_();
   void build_rainbow_frame_(float fade_factor);
   void apply_arm_select_overlay_();
+  void apply_group_caps_();   // NEW: final per-group scaling
   void send_frame_();
 
-  uint8_t scale_group_value_(const std::string &group, uint8_t v) const;
   int get_arm_select_led_index_() const;
   std::string get_arm_select_group_name_() const;
   bool rfid_visual_active_() const;
   float current_rfid_fade_factor_() const;
   void finish_rfid_fade_out_();
   void apply_pending_for_group_(const std::string &group);
-
-  // New: finalize pending disable when OFF phase reached
   void finalize_arm_select_disable_();
 
   void hsv_to_grb_(float h, float s, float v, uint8_t &g, uint8_t &r, uint8_t &b) const;
@@ -151,7 +146,7 @@ class ARGBStripOutput : public output::FloatOutput, public Component {
   void write_state(float state) override;
   ARGBStripComponent *parent_{nullptr};
   std::string group_;
-  uint8_t channel_{0}; // 0=R 1=G 2=B
+  uint8_t channel_{0};
 };
 
 }  // namespace argb_strip
