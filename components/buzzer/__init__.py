@@ -5,9 +5,15 @@ from esphome import automation, pins
 
 buzzer_ns = cg.esphome_ns.namespace("buzzer")
 BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
+
 StartAction = buzzer_ns.class_("StartAction", automation.Action)
 StopAction = buzzer_ns.class_("StopAction", automation.Action)
 KeyBeepAction = buzzer_ns.class_("KeyBeepAction", automation.Action)
+
+ToneMuteAction = buzzer_ns.class_("ToneMuteAction", automation.Action)
+ToneUnmuteAction = buzzer_ns.class_("ToneUnmuteAction", automation.Action)
+BeepMuteAction = buzzer_ns.class_("BeepMuteAction", automation.Action)
+BeepUnmuteAction = buzzer_ns.class_("BeepUnmuteAction", automation.Action)
 
 CONF_BEEPS = "beeps"
 CONF_SHORT_PAUSE = "short_pause"
@@ -87,5 +93,42 @@ async def buzzer_stop_to_code(config, action_id, template_arg, args):
     cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
 )
 async def buzzer_key_beep_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+# ---- Mute / Unmute Actions ----
+@automation.register_action(
+    "buzzer.tone_mute",
+    ToneMuteAction,
+    cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
+)
+async def buzzer_tone_mute_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+@automation.register_action(
+    "buzzer.tone_unmute",
+    ToneUnmuteAction,
+    cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
+)
+async def buzzer_tone_unmute_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+@automation.register_action(
+    "buzzer.beep_mute",
+    BeepMuteAction,
+    cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
+)
+async def buzzer_beep_mute_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+@automation.register_action(
+    "buzzer.beep_unmute",
+    BeepUnmuteAction,
+    cv.Schema({cv.Required(CONF_ID): cv.use_id(BuzzerComponent)}),
+)
+async def buzzer_beep_unmute_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, parent)
