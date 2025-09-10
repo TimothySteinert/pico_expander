@@ -1,6 +1,12 @@
 #include "k1_uart.h"
 #include "esphome/core/log.h"
 
+#ifdef USE_ESP32
+// Include the existing external buzzer component's public header.
+// (We DO NOT re-implement or vendor its code.)
+#include "esphome/components/buzzer/buzzer.h"
+#endif
+
 namespace esphome {
 namespace k1_uart {
 
@@ -39,7 +45,7 @@ void K1UartComponent::setup() {
   }
 
   uart_flush_input(UART_PORT);
-  ESP_LOGI(TAG, "UART ready (framed parser active, hex only).");
+  ESP_LOGI(TAG, "UART ready (frames: A0=21, A1=2, hex only).");
 #endif
 }
 
@@ -59,18 +65,16 @@ void K1UartComponent::loop() {
 void K1UartComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "K1 UART:");
 #ifdef USE_ESP32
-  ESP_LOGCONFIG(TAG, "  Port: UART1");
-  ESP_LOGCONFIG(TAG, "  Pins: TX=%d RX=%d", PIN_TX, PIN_RX);
-  ESP_LOGCONFIG(TAG, "  Baud: %d", BAUD);
-  ESP_LOGCONFIG(TAG, "  Parser: A0(21 bytes), A1(2 bytes)");
-  ESP_LOGCONFIG(TAG, "  Output: HEX only (no ASCII)");
+  ESP_LOGCONFIG(TAG, "  Port: UART1  Pins: TX=%d RX=%d  Baud=%d", PIN_TX, PIN_RX, BAUD);
+  ESP_LOGCONFIG(TAG, "  Frames: A0=21 bytes, A1=2 bytes");
+  ESP_LOGCONFIG(TAG, "  Buzzer linked: %s", buzzer_ ? "YES" : "NO");
 #else
   ESP_LOGCONFIG(TAG, "  (Unsupported platform build)");
 #endif
 }
 
 #ifdef USE_ESP32
-// ------------ Ring Buffer Helpers -------------
+// ---------------- Ring Buffer ----------------
 void K1UartComponent::push_byte_(uint8_t b) {
   if (ring_full_) {
     ring_tail_ = (ring_tail_ + 1) % RING_CAP;  // overwrite oldest
@@ -106,11 +110,12 @@ void K1UartComponent::pop_(size_t n) {
   ring_full_ = false;
 }
 
-// ------------ Frame Parsing -------------
+// ---------------- Parsing ----------------
 void K1UartComponent::parse_frames_() {
   while (available_()) {
     uint8_t id = peek_();
     size_t needed = 0;
+
     if (id == ID_A0) {
       needed = LEN_A0;
     } else if (id == ID_A1) {
@@ -121,22 +126,25 @@ void K1UartComponent::parse_frames_() {
       continue;
     }
 
-    if (size_() < needed) {
-      break;  // wait for more bytes
-    }
+    if (size_() < needed)
+      break; // wait for complete frame
 
-    uint8_t frame[LEN_A0];  // Max frame size
-    for (size_t i = 0; i < needed; i++) frame[i] = peek_(i);
+    uint8_t frame[LEN_A0]; // largest size
+    for (size_t i = 0; i < needed; i++)
+      frame[i] = peek_(i);
 
     log_frame_(frame, needed, id);
     pop_(needed);
+
+    // Trigger buzzer key beep on any A1 frame
+    if (id == ID_A1 && buzzer_ != nullptr) {
+      buzzer_->key_beep();
+    }
   }
 }
 
-// ------------ Logging (HEX only) -------------
+// ---------------- Logging ----------------
 void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
-  // Build hex string
-  // Worst case: "XX " * 21 -> 63 chars + terminator
   char hex_part[70];
   size_t hpos = 0;
   for (size_t i = 0; i < len; i++) {
@@ -149,11 +157,11 @@ void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
     hex_part[hpos] = 0;
 
   if (id == ID_A0) {
-    ESP_LOGD(TAG, "A0 (%u): %s", (unsigned)len, hex_part);
+    ESP_LOGD(TAG, "A0 (%u): %s", (unsigned) len, hex_part);
   } else if (id == ID_A1) {
-    ESP_LOGD(TAG, "A1 (%u): %s", (unsigned)len, hex_part);
+    ESP_LOGD(TAG, "A1 (%u): %s", (unsigned) len, hex_part);
   } else {
-    ESP_LOGD(TAG, "ID %02X (%u): %s", id, (unsigned)len, hex_part);
+    ESP_LOGD(TAG, "ID %02X (%u): %s", id, (unsigned) len, hex_part);
   }
 }
 #endif  // USE_ESP32
