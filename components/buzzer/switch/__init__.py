@@ -6,7 +6,6 @@ from esphome import automation
 
 buzzer_ns = cg.esphome_ns.namespace("buzzer")
 BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
-
 BuzzerMuteSwitch = buzzer_ns.class_("BuzzerMuteSwitch", switch.Switch, cg.Component)
 
 CONF_BUZZER_ID = "buzzer_id"
@@ -23,15 +22,18 @@ CONFIG_SCHEMA = switch.switch_schema(BuzzerMuteSwitch).extend(
 
 async def to_code(config):
     parent = await cg.get_variable(config[CONF_BUZZER_ID])
+    # Create the switch (constructor takes parent)
     var = cg.new_Pvariable(config[CONF_ID], parent)
 
-    # Map type string to enum (0 = tone, 1 = beep)
+    # Set which mute type (0 = tone, 1 = beep)
     type_enum = 0 if config[CONF_TYPE] == "tone_mute" else 1
     cg.add(var.set_type(type_enum))
 
-    switch.setup_switch(var, config)
+    # Register as component then as switch
     await cg.register_component(var, config)
+    await switch.register_switch(var, config)
 
+    # Let parent keep pointer so it can sync states
     if config[CONF_TYPE] == "tone_mute":
         cg.add(parent.register_tone_switch(var))
     else:
