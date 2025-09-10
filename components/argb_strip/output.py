@@ -34,4 +34,4 @@ async def to_code(config):
 
     cg.add(var.set_parent(parent))
     cg.add(var.set_group_name(config[CONF_GROUP]))
-    cg.add(var.set_channel(config[CHANNEL]))
+    cg.add(var.set_channel(config[CONF_CHANNEL]))
