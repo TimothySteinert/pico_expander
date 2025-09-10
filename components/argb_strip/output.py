@@ -21,7 +21,7 @@ CONFIG_SCHEMA = output.FLOAT_OUTPUT_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(ARGBStripOutput),
         cv.GenerateID(CONF_ARGB_STRIP_ID): cv.use_id(ARGBStripComponent),
-        cv.Required(CONF_GROUP): cv.valid_name(),
+        cv.Required(CONF_GROUP): cv.valid_name,
         cv.Required(CONF_CHANNEL): cv.enum(COLOR_CHANNELS, lower=True),
     }
 ).extend(cv.COMPONENT_SCHEMA)
