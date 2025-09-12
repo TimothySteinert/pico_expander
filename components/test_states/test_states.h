@@ -14,6 +14,11 @@ class ModeTrigger : public Trigger<> {
   ModeTrigger() = default;
 };
 
+class PreModeTrigger : public Trigger<> {
+ public:
+  PreModeTrigger() = default;
+};
+
 class TestStatesComponent : public Component {
  public:
   void setup() override {}
@@ -23,6 +28,8 @@ class TestStatesComponent : public Component {
   void set_mode_by_name(const std::string &name);
   const std::string &current_mode() const { return current_mode_; }
 
+  // Register triggers
+  void add_inter_mode_trigger(PreModeTrigger *t) { intermode_trigs_.push_back(t); }
   void add_mode1_trigger(ModeTrigger *t) { mode1_trigs_.push_back(t); }
   void add_mode2_trigger(ModeTrigger *t) { mode2_trigs_.push_back(t); }
   void add_mode3_trigger(ModeTrigger *t) { mode3_trigs_.push_back(t); }
@@ -34,6 +41,7 @@ class TestStatesComponent : public Component {
  protected:
   std::string current_mode_{"mode1"};
 
+  std::vector<PreModeTrigger*> intermode_trigs_;
   std::vector<ModeTrigger*> mode1_trigs_;
   std::vector<ModeTrigger*> mode2_trigs_;
   std::vector<ModeTrigger*> mode3_trigs_;
@@ -41,6 +49,7 @@ class TestStatesComponent : public Component {
   std::vector<ModeTrigger*> mode5_trigs_;
 
   void fire_for_mode_(const std::string &mode);
+  void fire_intermode_();
 };
 
 template<typename... Ts>
