@@ -1,4 +1,5 @@
 #include "k1_alarm_listener.h"
+#include "esphome/core/log.h"
 #include "esp_timer.h"
 
 namespace esphome {
@@ -50,7 +51,6 @@ void K1AlarmListener::loop() {
     last_api_connected_ = connected;
     ESP_LOGI(TAG, "API connection %s", connected ? "RESTORED" : "LOST");
     update_connection_sensor_(connected);
-    // Connection change impacts effective state
     schedule_state_publish();
   }
 
@@ -81,7 +81,6 @@ void K1AlarmListener::schedule_state_publish() {
   publish_pending_ = true;
   if (publish_scheduled_) return;
   publish_scheduled_ = true;
-  // Defer to next loop (0ms timeout)
   this->set_timeout(0, [this]() {
     this->publish_scheduled_ = false;
     this->finalize_publish_();
@@ -125,7 +124,6 @@ bool K1AlarmListener::api_connected_now_() const {
 void K1AlarmListener::start_override_(const std::string &state, uint32_t dur_ms) {
   override_active_ = true;
   override_state_ = state;
-  // We store absolute end time in ms relative to boot
   override_end_ms_ = now_ms_() + dur_ms;
   schedule_state_publish();
 }
@@ -159,7 +157,6 @@ bool K1AlarmListener::attr_has_value_(const std::string &v) const {
 bool K1AlarmListener::is_truthy_list_(const std::string &v) const {
   if (v.empty()) return false;
   std::string trimmed = v;
-  // quick trim
   while (!trimmed.empty() && isspace((unsigned char)trimmed.front())) trimmed.erase(trimmed.begin());
   while (!trimmed.empty() && isspace((unsigned char)trimmed.back())) trimmed.pop_back();
   std::string low;
@@ -192,7 +189,6 @@ bool K1AlarmListener::transitional_has_required_attrs_(const std::string &mapped
 
 // ---------- Effective State Computation ----------
 std::string K1AlarmListener::compute_effective_state_() {
-  // Connection baseline
   if (!api_connected_now_())
     return "connection_timeout";
 
@@ -204,21 +200,16 @@ std::string K1AlarmListener::compute_effective_state_() {
   if (mapped_state_ == "connection_timeout")
     return "connection_timeout";
 
-  // If override is active, check expiry externally and show override
   if (override_active_) {
-    // (expiry tick handled in loop)
     return override_state_;
   }
 
-  // Transitional generic waiting for attributes? Provide generic only if attributes available or fallback?
   if (is_transitional_generic_(mapped_state_)) {
     if (!transitional_has_required_attrs_(mapped_state_)) {
-      // Still waiting for disambiguation; show placeholder
       return "connection_timeout";
     }
   }
 
-  // Alarm type inference
   std::string inferred = (alarm_type_ == AlarmIntegrationType::ALARMO)
                            ? infer_alarm_state_(mapped_state_)
                            : mapped_state_;
@@ -227,9 +218,7 @@ std::string K1AlarmListener::compute_effective_state_() {
 }
 
 std::string K1AlarmListener::infer_alarm_state_(const std::string &mapped) {
-  // Build lowercase trimmed for attributes
   auto lower_trim = [](std::string s) {
-    // trim
     while (!s.empty() && isspace((unsigned char)s.front())) s.erase(s.begin());
     while (!s.empty() && isspace((unsigned char)s.back())) s.pop_back();
     std::string out; out.reserve(s.size());
@@ -241,30 +230,33 @@ std::string K1AlarmListener::infer_alarm_state_(const std::string &mapped) {
   std::string next_state = lower_trim(attr_next_state_);
   bool bypassed_non_empty = is_truthy_list_(attr_bypassed_);
 
+  // Transitional disambiguation
   if (mapped == "arming") {
     if (arm_mode == "armed_home") return "arming_home";
     if (arm_mode == "armed_away") return "arming_away";
     if (arm_mode == "armed_night") return "arming_night";
     if (arm_mode == "armed_vacation") return "arming_vacation";
-    if (arm_mode == "armed_custom_bypass") return "arming_custom";
+    if (arm_mode == "armed_custom_bypass") return "arming_custom_bypass";
     return mapped;
   }
 
   if (mapped == "pending") {
-    if (arm_mode == "armed_home" || next_state == "armed_home") return "pending_home";
-    if (arm_mode == "armed_away" || next_state == "armed_away") return "pending_away";
-    if (arm_mode == "armed_night" || next_state == "armed_night") return "pending_night";
-    if (arm_mode == "armed_vacation" || next_state == "armed_vacation") return "pending_vacation";
-    if (arm_mode == "armed_custom_bypass" || next_state == "armed_custom_bypass") return "pending_custom";
+    if (arm_mode == "armed_home"        || next_state == "armed_home") return "pending_home";
+    if (arm_mode == "armed_away"        || next_state == "armed_away") return "pending_away";
+    if (arm_mode == "armed_night"       || next_state == "armed_night") return "pending_night";
+    if (arm_mode == "armed_vacation"    || next_state == "armed_vacation") return "pending_vacation";
+    if (arm_mode == "armed_custom_bypass" || next_state == "armed_custom_bypass") return "pending_custom_bypass";
     return mapped;
   }
 
+  // Armed states with conditional bypass variants (EXCEPT custom_bypass which is intrinsic)
   if (mapped == "armed_home")     return bypassed_non_empty ? "armed_home_bypass" : "armed_home";
   if (mapped == "armed_away")     return bypassed_non_empty ? "armed_away_bypass" : "armed_away";
   if (mapped == "armed_night")    return bypassed_non_empty ? "armed_night_bypass" : "armed_night";
   if (mapped == "armed_vacation") return bypassed_non_empty ? "armed_vacation_bypass" : "armed_vacation";
-  if (mapped == "armed_custom_bypass")
-    return bypassed_non_empty ? "armed_custom_bypass" : "armed_custom";
+
+  // Custom bypass is always that mode; never collapse to a non-bypass variant
+  if (mapped == "armed_custom_bypass") return "armed_custom_bypass";
 
   return mapped;
 }
@@ -318,6 +310,12 @@ void K1AlarmListener::failed_arm_service_(std::string reason) {
   if (mapped_state_ == "connection_timeout" || mapped_state_.empty()) return;
   handle_failed_arm_reason_(reason);
 }
+
+// ------------- Internal callback method pointer wrappers -------------
+void K1AlarmListener::ha_state_callback_(std::string s);
+void K1AlarmListener::arm_mode_attr_callback_(std::string v);
+void K1AlarmListener::next_state_attr_callback_(std::string v);
+void K1AlarmListener::bypassed_attr_callback_(std::string v);
 
 }  // namespace k1_alarm_listener
 }  // namespace esphome
