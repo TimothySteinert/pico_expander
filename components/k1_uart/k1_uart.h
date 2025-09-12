@@ -8,10 +8,12 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace esphome {
 namespace buzzer { class BuzzerComponent; }
-namespace k1_arm_handler { class K1ArmHandlerComponent; }  // forward declaration
+namespace script { class Script; class ScriptExecutor; }
 
 namespace k1_uart {
 
@@ -24,10 +26,17 @@ class K1UartComponent : public Component {
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
   void set_buzzer(esphome::buzzer::BuzzerComponent *b) { buzzer_ = b; }
-  void set_arm_handler(esphome::k1_arm_handler::K1ArmHandlerComponent *h) { arm_handler_ = h; }
+
+  void set_away_script(esphome::script::Script *s) { away_script_ = s; }
+  void set_home_script(esphome::script::Script *s) { home_script_ = s; }
+  void set_disarm_script(esphome::script::Script *s) { disarm_script_ = s; }
+
+  void set_force_prefix(const std::string &v) { force_prefix_ = v; }
+  void set_skip_delay_prefix(const std::string &v) { skip_delay_prefix_ = v; }
 
  protected:
 #ifdef USE_ESP32
+  // UART constants
   static constexpr uart_port_t UART_PORT = UART_NUM_1;
   static constexpr int RX_BUF_SIZE = 1024;
   static constexpr int TX_BUF_SIZE = 0;
@@ -44,7 +53,7 @@ class K1UartComponent : public Component {
   size_t ring_tail_{0};
   bool ring_full_{false};
 
-  // IDs & lengths
+  // Frame IDs & lengths
   static constexpr uint8_t ID_A0 = 0xA0;
   static constexpr uint8_t ID_A1 = 0xA1;
   static constexpr size_t LEN_A0 = 21;
@@ -57,13 +66,36 @@ class K1UartComponent : public Component {
   uint8_t peek_(size_t offset = 0) const;
   void pop_(size_t n);
 
-  // Parsing & logging
+  // Parsing
   void parse_frames_();
+  void handle_a0_(const uint8_t *frame, size_t len);
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
+
+  // Digit & arm select mapping (from your previous handler)
+  std::string map_digit_(uint8_t code) const;
+  const char *map_arm_select_(uint8_t code) const;
+
+  // Script invocation
+  void call_arm_script_(esphome::script::Script *script,
+                        const std::string &pin,
+                        bool force_flag,
+                        bool skip_flag);
+  void call_disarm_script_(esphome::script::Script *script,
+                           const std::string &prefix,
+                           const std::string &pin,
+                           bool force_flag,
+                           bool skip_flag);
 #endif
 
+  // Linked components/scripts
   esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
-  esphome::k1_arm_handler::K1ArmHandlerComponent *arm_handler_{nullptr};
+  esphome::script::Script *away_script_{nullptr};
+  esphome::script::Script *home_script_{nullptr};
+  esphome::script::Script *disarm_script_{nullptr};
+
+  // Prefix rules
+  std::string force_prefix_{"999"};
+  std::string skip_delay_prefix_{"998"};
 };
 
 }  // namespace k1_uart
