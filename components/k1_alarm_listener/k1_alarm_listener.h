@@ -37,7 +37,7 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   float get_setup_priority() const override { return setup_priority::DATA; }
 
  protected:
-  // Configuration
+  // Config
   std::string alarm_entity_;
   AlarmIntegrationType alarm_type_{AlarmIntegrationType::ALARMO};
 
@@ -45,15 +45,16 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   K1AlarmListenerTextSensor *main_sensor_{nullptr};
   binary_sensor::BinarySensor *ha_connection_sensor_{nullptr};
 
-  // Connection/state
+  // Connection/base state
   bool subscription_started_{false};
   bool last_api_connected_{true};
+  bool initial_state_published_{false};
 
-  // Base mapped state (after unknown/unavailable mapping)
-  std::string current_base_state_;
-  std::string last_published_state_;
+  std::string current_base_state_;     // mapped entity state (unavailable/unknown -> connection_timeout)
+  std::string last_published_state_;   // what we actually exposed last
+  std::string last_inferred_state_;    // last computed (for upgrade checks)
 
-  // Attribute cache (Alarmo only)
+  // Attribute cache
   struct AttrCache {
     std::string arm_mode;
     std::string next_state;
@@ -64,8 +65,13 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   } attr_;
 
   bool attributes_supported_{false};
-  bool waiting_for_attributes_{false};
-  bool initial_state_published_{false};  // ensures we publish connection_timeout exactly once at boot
+
+  // Publish coalescing
+  bool pending_publish_{false};     // we have new data to (re-)evaluate
+  bool publish_scheduled_{false};   // a finalize_publish_ is already scheduled
+  uint8_t publish_retry_count_{0};  // retry loops for transitional wait
+  static constexpr uint8_t MAX_PUBLISH_RETRIES = 3;  // after this we give up waiting and publish generic
+  bool waiting_for_transitional_attrs_{false};
 
   // Constants
   static constexpr const char *CONNECTION_TIMEOUT_STATE = "connection_timeout";
@@ -81,22 +87,23 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   void update_connection_sensor_(bool connected);
   void enforce_connection_state_();
 
-  // Logic
+  // Logic helpers
   std::string map_alarm_state_(const std::string &raw) const;
-  bool state_requires_attributes_(const std::string &mapped) const;
-  bool have_required_attributes_for_state_(const std::string &mapped) const;
-  std::string compute_inferred_state_(const std::string &mapped) const;
-  void attempt_publish_alarmo_();  // publish when requirements satisfied
-  bool is_truthy_attr_list_(const std::string &v) const;
+  bool is_transitional_(const std::string &mapped) const;  // arming/pending
+  bool have_transitional_attrs_(const std::string &mapped) const;
+  std::string infer_state_(const std::string &mapped) const; // core inference
+  bool is_truthy_list_(const std::string &v) const;
 
-  // Helpers
+  // Coalesced publish
+  void schedule_publish_();
+  void finalize_publish_();  // called deferred
+  void publish_state_if_changed_(const std::string &st);
+  void publish_initial_connection_timeout_();
+
+  // Utils
   static bool attr_has_value_(const std::string &v);
   static std::string lower_copy_(const std::string &s);
   static std::string trim_copy_(const std::string &s);
-
-  // Publishing
-  void publish_state_if_changed_(const std::string &st);
-  void publish_initial_connection_timeout_();
 };
 
 class K1AlarmListenerTextSensor : public text_sensor::TextSensor, public Component {
