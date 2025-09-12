@@ -4,6 +4,7 @@
 #include "esphome/components/api/custom_api_device.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/helpers.h"
 
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
@@ -31,6 +32,9 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   void set_text_sensor(K1AlarmListenerTextSensor *ts);
   void register_ha_connection_sensor(binary_sensor::BinarySensor *bs) { ha_connection_sensor_ = bs; }
 
+  void set_incorrect_pin_timeout_ms(uint32_t v) { incorrect_pin_timeout_ms_ = v; }
+  void set_failed_open_sensors_timeout_ms(uint32_t v) { failed_open_sensors_timeout_ms_ = v; }
+
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -40,6 +44,8 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   // Config
   std::string alarm_entity_;
   AlarmIntegrationType alarm_type_{AlarmIntegrationType::ALARMO};
+  uint32_t incorrect_pin_timeout_ms_{2000};
+  uint32_t failed_open_sensors_timeout_ms_{2000};
 
   // Sensors
   K1AlarmListenerTextSensor *main_sensor_{nullptr};
@@ -50,9 +56,8 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   bool last_api_connected_{true};
   bool initial_state_published_{false};
 
-  std::string current_base_state_;     // mapped entity state (unavailable/unknown -> connection_timeout)
-  std::string last_published_state_;   // what we actually exposed last
-  std::string last_inferred_state_;    // last computed (for upgrade checks)
+  std::string current_base_state_;
+  std::string last_published_state_;
 
   // Attribute cache
   struct AttrCache {
@@ -63,15 +68,19 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
     bool next_state_seen{false};
     bool bypassed_seen{false};
   } attr_;
-
   bool attributes_supported_{false};
 
-  // Publish coalescing
-  bool pending_publish_{false};     // we have new data to (re-)evaluate
-  bool publish_scheduled_{false};   // a finalize_publish_ is already scheduled
-  uint8_t publish_retry_count_{0};  // retry loops for transitional wait
-  static constexpr uint8_t MAX_PUBLISH_RETRIES = 3;  // after this we give up waiting and publish generic
+  // Coalesced publishing
+  bool pending_publish_{false};
+  bool publish_scheduled_{false};
   bool waiting_for_transitional_attrs_{false};
+  uint8_t publish_retry_count_{0};
+  static constexpr uint8_t MAX_PUBLISH_RETRIES = 3;
+
+  // Override (final override) state
+  bool override_active_{false};
+  std::string override_state_;
+  CancelableCallback override_cancel_{};
 
   // Constants
   static constexpr const char *CONNECTION_TIMEOUT_STATE = "connection_timeout";
@@ -82,25 +91,33 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   void next_state_attr_callback_(std::string value);
   void bypassed_attr_callback_(std::string value);
 
-  // Connection helpers
+  // Service callback
+  void on_failed_arm_service_(std::string reason);
+
+  // Connection
   bool api_connected_now_() const;
   void update_connection_sensor_(bool connected);
   void enforce_connection_state_();
 
-  // Logic helpers
+  // Logic
   std::string map_alarm_state_(const std::string &raw) const;
-  bool is_transitional_(const std::string &mapped) const;  // arming/pending
+  bool is_transitional_(const std::string &mapped) const;
   bool have_transitional_attrs_(const std::string &mapped) const;
-  std::string infer_state_(const std::string &mapped) const; // core inference
+  std::string infer_state_(const std::string &mapped) const;
   bool is_truthy_list_(const std::string &v) const;
 
   // Coalesced publish
   void schedule_publish_();
-  void finalize_publish_();  // called deferred
+  void finalize_publish_();
+
+  // Override handling
+  void start_override_(const std::string &state, uint32_t duration_ms);
+  void clear_override_();
+  bool can_apply_override_() const;
+
+  // Publishing / utils
   void publish_state_if_changed_(const std::string &st);
   void publish_initial_connection_timeout_();
-
-  // Utils
   static bool attr_has_value_(const std::string &v);
   static std::string lower_copy_(const std::string &s);
   static std::string trim_copy_(const std::string &s);
