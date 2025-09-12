@@ -28,25 +28,79 @@ class TestStatesComponent : public Component {
   void set_mode_by_name(const std::string &name);
   const std::string &current_mode() const { return current_mode_; }
 
-  // Register triggers
+  // Intermode (pre-transition) triggers
   void add_inter_mode_trigger(PreModeTrigger *t) { intermode_trigs_.push_back(t); }
-  void add_mode1_trigger(ModeTrigger *t) { mode1_trigs_.push_back(t); }
-  void add_mode2_trigger(ModeTrigger *t) { mode2_trigs_.push_back(t); }
-  void add_mode3_trigger(ModeTrigger *t) { mode3_trigs_.push_back(t); }
-  void add_mode4_trigger(ModeTrigger *t) { mode4_trigs_.push_back(t); }
-  void add_mode5_trigger(ModeTrigger *t) { mode5_trigs_.push_back(t); }
+
+  // Add trigger methods for each fixed mode
+  void add_disarmed_trigger(ModeTrigger *t) { disarmed_.push_back(t); }
+  void add_triggered_trigger(ModeTrigger *t) { triggered_.push_back(t); }
+  void add_connection_timeout_trigger(ModeTrigger *t) { connection_timeout_.push_back(t); }
+  void add_incorrect_pin_trigger(ModeTrigger *t) { incorrect_pin_.push_back(t); }
+  void add_failed_open_sensors_trigger(ModeTrigger *t) { failed_open_sensors_.push_back(t); }
+
+  void add_arming_trigger(ModeTrigger *t) { arming_.push_back(t); }
+  void add_arming_home_trigger(ModeTrigger *t) { arming_home_.push_back(t); }
+  void add_arming_away_trigger(ModeTrigger *t) { arming_away_.push_back(t); }
+  void add_arming_night_trigger(ModeTrigger *t) { arming_night_.push_back(t); }
+  void add_arming_vacation_trigger(ModeTrigger *t) { arming_vacation_.push_back(t); }
+  void add_arming_custom_bypass_trigger(ModeTrigger *t) { arming_custom_bypass_.push_back(t); }
+
+  void add_pending_trigger(ModeTrigger *t) { pending_.push_back(t); }
+  void add_pending_home_trigger(ModeTrigger *t) { pending_home_.push_back(t); }
+  void add_pending_away_trigger(ModeTrigger *t) { pending_away_.push_back(t); }
+  void add_pending_night_trigger(ModeTrigger *t) { pending_night_.push_back(t); }
+  void add_pending_vacation_trigger(ModeTrigger *t) { pending_vacation_.push_back(t); }
+  void add_pending_custom_bypass_trigger(ModeTrigger *t) { pending_custom_bypass_.push_back(t); }
+
+  void add_armed_home_trigger(ModeTrigger *t) { armed_home_.push_back(t); }
+  void add_armed_away_trigger(ModeTrigger *t) { armed_away_.push_back(t); }
+  void add_armed_night_trigger(ModeTrigger *t) { armed_night_.push_back(t); }
+  void add_armed_vacation_trigger(ModeTrigger *t) { armed_vacation_.push_back(t); }
+
+  void add_armed_home_bypass_trigger(ModeTrigger *t) { armed_home_bypass_.push_back(t); }
+  void add_armed_away_bypass_trigger(ModeTrigger *t) { armed_away_bypass_.push_back(t); }
+  void add_armed_night_bypass_trigger(ModeTrigger *t) { armed_night_bypass_.push_back(t); }
+  void add_armed_vacation_bypass_trigger(ModeTrigger *t) { armed_vacation_bypass_.push_back(t); }
+  void add_armed_custom_bypass_trigger(ModeTrigger *t) { armed_custom_bypass_.push_back(t); }
 
   void set_initial_mode(const std::string &m) { current_mode_ = m; }
 
  protected:
-  std::string current_mode_{"mode1"};
+  std::string current_mode_{"disarmed"};
 
   std::vector<PreModeTrigger*> intermode_trigs_;
-  std::vector<ModeTrigger*> mode1_trigs_;
-  std::vector<ModeTrigger*> mode2_trigs_;
-  std::vector<ModeTrigger*> mode3_trigs_;
-  std::vector<ModeTrigger*> mode4_trigs_;
-  std::vector<ModeTrigger*> mode5_trigs_;
+
+  // Trigger vectors
+  std::vector<ModeTrigger*> disarmed_;
+  std::vector<ModeTrigger*> triggered_;
+  std::vector<ModeTrigger*> connection_timeout_;
+  std::vector<ModeTrigger*> incorrect_pin_;
+  std::vector<ModeTrigger*> failed_open_sensors_;
+
+  std::vector<ModeTrigger*> arming_;
+  std::vector<ModeTrigger*> arming_home_;
+  std::vector<ModeTrigger*> arming_away_;
+  std::vector<ModeTrigger*> arming_night_;
+  std::vector<ModeTrigger*> arming_vacation_;
+  std::vector<ModeTrigger*> arming_custom_bypass_;
+
+  std::vector<ModeTrigger*> pending_;
+  std::vector<ModeTrigger*> pending_home_;
+  std::vector<ModeTrigger*> pending_away_;
+  std::vector<ModeTrigger*> pending_night_;
+  std::vector<ModeTrigger*> pending_vacation_;
+  std::vector<ModeTrigger*> pending_custom_bypass_;
+
+  std::vector<ModeTrigger*> armed_home_;
+  std::vector<ModeTrigger*> armed_away_;
+  std::vector<ModeTrigger*> armed_night_;
+  std::vector<ModeTrigger*> armed_vacation_;
+
+  std::vector<ModeTrigger*> armed_home_bypass_;
+  std::vector<ModeTrigger*> armed_away_bypass_;
+  std::vector<ModeTrigger*> armed_night_bypass_;
+  std::vector<ModeTrigger*> armed_vacation_bypass_;
+  std::vector<ModeTrigger*> armed_custom_bypass_;
 
   void fire_for_mode_(const std::string &mode);
   void fire_intermode_();
