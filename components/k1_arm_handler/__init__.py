@@ -1,17 +1,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 
-# NOTE: We do not import or reference api.CustomAPIDevice here because it is not
-# available as a Python binding in some ESPHome versions. The extra C++ base
-# class (api::CustomAPIDevice) is declared only in C++.
-# If you later need to register custom API services callable from HA->ESPHome,
-# you can add custom_services: true under the api: block in YAML.
-
 k1_arm_handler_ns = cg.esphome_ns.namespace("k1_arm_handler")
-K1ArmHandlerComponent = k1_arm_handler_ns.class_(
-    "K1ArmHandlerComponent",
-    cg.Component
-)
+K1ArmHandlerComponent = k1_arm_handler_ns.class_("K1ArmHandlerComponent", cg.Component)
 
 CONF_ID = "id"
 CONF_ALARM_ENTITY_ID = "alarm_entity_id"
