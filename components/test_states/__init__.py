@@ -3,9 +3,10 @@ import esphome.config_validation as cv
 from esphome import automation
 from esphome.const import CONF_ID
 
-# Namespace & classes
+# Namespace
 test_states_ns = cg.esphome_ns.namespace("test_states")
 
+# Classes defined in C++
 TestStatesComponent = test_states_ns.class_("TestStatesComponent", cg.Component)
 ModeTrigger = test_states_ns.class_("ModeTrigger", automation.Trigger)
 SetModeAction = test_states_ns.class_("SetModeAction", automation.Action)
@@ -13,13 +14,17 @@ SetModeAction = test_states_ns.class_("SetModeAction", automation.Action)
 CONF_MODES = "modes"
 CONF_MODE = "mode"
 
-# Allow multiple component instances
 MULTI_CONF = True
 
-# Each mode name -> list of automation blocks
+# Each mode name maps to ONE automation (single=True) -> user provides an automation dict
+# Example:
+# modes:
+#   incorrect_pin:
+#     then:
+#       - logger.log: "Handling incorrect pin"
 MODES_SCHEMA = cv.Schema(
     {
-        cv.string: cv.All(cv.ensure_list(automation.validate_automation()))
+        cv.string: automation.validate_automation(single=True)
     }
 )
 
@@ -42,7 +47,7 @@ CONFIG_SCHEMA = cv.All(cv.ensure_list(COMPONENT_SCHEMA))
         }
     ),
 )
-async def test_states_set_mode_to_code(config, action_id, template_arg, args):
+async def test_states_set_mode_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     action = cg.new_Pvariable(action_id, template_arg, parent)
     mode_expr = await cg.templatable(config[CONF_MODE], args, cg.std_string)
@@ -56,9 +61,9 @@ async def to_code(config):
         await cg.register_component(var, comp_conf)
 
         modes = comp_conf.get(CONF_MODES, {})
-        # For each mode, create triggers
-        for mode_name, automation_list in modes.items():
-            for aut in automation_list:
-                trig = cg.new_Pvariable(aut[automation.CONF_TRIGGER_ID], var)
-                cg.add(var.add_mode_trigger(mode_name, trig))
-                await automation.build_automation(trig, [], aut)
+        for mode_name, auto_list in modes.items():
+            # auto_list is a list with exactly one automation dict (because single=True)
+            auto_conf = auto_list[0]
+            trig = cg.new_Pvariable(auto_conf[automation.CONF_TRIGGER_ID], var)
+            cg.add(var.add_mode_trigger(mode_name, trig))
+            await automation.build_automation(trig, [], auto_conf)
