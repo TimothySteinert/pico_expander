@@ -16,15 +16,34 @@ MODE_KEYS = ["mode1", "mode2", "mode3", "mode4", "mode5"]
 
 MULTI_CONF = True
 
-# Build a validator for an automation whose trigger is ModeTrigger
+# Validator for an automation whose trigger is ModeTrigger
 MODE_AUTOMATION = automation.validate_automation({
     cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(ModeTrigger),
 })
 
-# Each mode key may have a list of automation blocks
-SCHEMA_MODES = {
-    cv.Optional(mk): cv.ensure_list(MODE_AUTOMATION) for mk in MODE_KEYS
-}
+def _automation_blocks(value):
+    """
+    Accept either:
+      modeX:
+        then:
+          - logger.log: "..."
+    or:
+      modeX:
+        - then:
+            - logger.log: "..."
+        - then:
+            - logger.log: "second block"
+    Returns a FLAT list of trigger dicts.
+    """
+    flat = []
+    if isinstance(value, list):
+        for item in value:
+            flat.extend(MODE_AUTOMATION(item))  # each call returns a list
+    else:
+        flat.extend(MODE_AUTOMATION(value))
+    return flat
+
+SCHEMA_MODES = {cv.Optional(mk): _automation_blocks for mk in MODE_KEYS}
 
 COMPONENT_SCHEMA = cv.Schema(
     {
@@ -61,10 +80,10 @@ async def to_code(config):
 
         first_defined = None
         for mk in MODE_KEYS:
-            blocks = comp_conf.get(mk, [])
-            if blocks and first_defined is None:
+            triggers = comp_conf.get(mk, [])
+            if triggers and first_defined is None:
                 first_defined = mk
-            for trig_conf in blocks:
+            for trig_conf in triggers:  # Already flat list of dicts
                 trig = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
                 cg.add(getattr(var, f"add_{mk}_trigger")(trig))
                 await automation.build_automation(trig, [], trig_conf)
