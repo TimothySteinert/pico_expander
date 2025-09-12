@@ -27,11 +27,11 @@ class TestStatesComponent : public Component {
 
   void set_mode_by_name(const std::string &name);
   const std::string &current_mode_string() const { return current_mode_; }
-
   void add_mode_trigger(const std::string &mode, ModeTrigger *t);
+  void set_initial_mode(const std::string &m) { current_mode_ = m; }
 
  protected:
-  std::string current_mode_{"mode1"};
+  std::string current_mode_{};
   std::map<std::string, std::vector<ModeTrigger *>> mode_triggers_;
 
   void fire_mode_(const std::string &mode);
