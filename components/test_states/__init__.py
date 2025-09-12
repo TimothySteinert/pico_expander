@@ -14,11 +14,42 @@ CONF_INITIAL_MODE = "initial_mode"
 CONF_MODE = "mode"
 CONF_INTERMODE = "intermode"
 
-MODE_KEYS = ["mode1", "mode2", "mode3", "mode4", "mode5"]
+# Full fixed mode list
+MODE_KEYS = [
+    "disarmed",
+    "triggered",
+    "connection_timeout",
+    "incorrect_pin",
+    "failed_open_sensors",
+
+    "arming",
+    "arming_home",
+    "arming_away",
+    "arming_night",
+    "arming_vacation",
+    "arming_custom_bypass",
+
+    "pending",
+    "pending_home",
+    "pending_away",
+    "pending_night",
+    "pending_vacation",
+    "pending_custom_bypass",
+
+    "armed_home",
+    "armed_away",
+    "armed_night",
+    "armed_vacation",
+
+    "armed_home_bypass",
+    "armed_away_bypass",
+    "armed_night_bypass",
+    "armed_vacation_bypass",
+    "armed_custom_bypass",
+]
 
 MULTI_CONF = True
 
-# Validators for automation blocks returning a list of trigger dicts
 MODE_AUTOMATION = automation.validate_automation({
     cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(ModeTrigger),
 })
@@ -76,7 +107,7 @@ async def to_code(config):
         var = cg.new_Pvariable(comp_conf[CONF_ID])
         await cg.register_component(var, comp_conf)
 
-        # Intermode (pre-transition) triggers
+        # Intermode triggers (run before every real transition)
         inter_trigs = comp_conf.get(CONF_INTERMODE, [])
         for trig_conf in inter_trigs:
             ptr = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
@@ -90,6 +121,7 @@ async def to_code(config):
                 first_defined = mk
             for trig_conf in triggers:
                 trig = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
+                # add_<mode>_trigger
                 cg.add(getattr(var, f"add_{mk}_trigger")(trig))
                 await automation.build_automation(trig, [], trig_conf)
 
@@ -99,4 +131,4 @@ async def to_code(config):
         elif first_defined is not None:
             cg.add(var.set_initial_mode(first_defined))
         else:
-            cg.add(var.set_initial_mode("mode1"))
+            cg.add(var.set_initial_mode("disarmed"))
