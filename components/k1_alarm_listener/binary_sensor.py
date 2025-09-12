@@ -8,9 +8,12 @@ from . import K1AlarmListener
 CONF_K1_ALARM_LISTENER_ID = "k1_alarm_listener_id"
 CONF_TYPE = "type"
 
-# For future expansion, we define types. Currently only 'ha_connected'.
+# Aliases all map to the same enum (0)
 BINARY_SENSOR_TYPES = {
     "ha_connected": 0,
+    "ha_available": 0,
+    "api_connected": 0,
+    "connection": 0,
 }
 
 K1AlarmListenerBinarySensor = cg.esphome_ns.namespace("k1_alarm_listener").class_(
@@ -23,7 +26,7 @@ CONFIG_SCHEMA = binary_sensor.BINARY_SENSOR_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(K1AlarmListenerBinarySensor),
         cv.GenerateID(CONF_K1_ALARM_LISTENER_ID): cv.use_id(K1AlarmListener),
-        cv.Optional(CONF_TYPE, default="ha_connected"): cv.one_of(*BINARY_SENSOR_TYPES, lower=True),
+        cv.Optional(CONF_TYPE, default="ha_connected"): cv.one_of(*BINARY_SENSOR_TYPES.keys(), lower=True),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
