@@ -1,12 +1,13 @@
 #include "k1_arm_handler.h"
 #include "esphome/core/log.h"
+#include "esphome/components/api/api_server.h"  // for api::global_api_server
 
 namespace esphome {
 namespace k1_arm_handler {
 
 static const char *const TAG = "k1_arm_handler";
 
-// Maps keypad scan codes to ASCII digits.
+// ------------------ Mapping Helpers ------------------
 std::string K1ArmHandlerComponent::map_digit_(uint8_t code) const {
   switch (code) {
     case 0x05: return "1";
@@ -32,13 +33,14 @@ const char *K1ArmHandlerComponent::map_arm_select_(uint8_t code) const {
   }
 }
 
+// ------------------ Frame Parser ------------------
 void K1ArmHandlerComponent::handle_a0_message(const std::vector<uint8_t> &bytes) {
   if (bytes.size() < 21) {
     ESP_LOGW(TAG, "A0 message too short (%u)", (unsigned) bytes.size());
     return;
   }
   if (bytes[0] != 0xA0) {
-    ESP_LOGV(TAG, "Not an A0 frame (first byte=0x%02X)", bytes[0]);
+    ESP_LOGV(TAG, "Not an A0 frame (first=0x%02X)", bytes[0]);
     return;
   }
 
@@ -62,7 +64,7 @@ void K1ArmHandlerComponent::handle_a0_message(const std::vector<uint8_t> &bytes)
   }
 
   if (arm_select.empty() || arm_select == "unknown" || pin.empty()) {
-    ESP_LOGW(TAG, "Invalid A0 content - arm_select='%s' pin_len=%u",
+    ESP_LOGW(TAG, "Invalid A0: arm_select='%s' pin_len=%u",
              arm_select.c_str(), (unsigned) pin.size());
     return;
   }
@@ -73,11 +75,12 @@ void K1ArmHandlerComponent::handle_a0_message(const std::vector<uint8_t> &bytes)
   this->execute_command(prefix, arm_select, pin);
 }
 
+// ------------------ Public Execute ------------------
 void K1ArmHandlerComponent::execute_command(const std::string &prefix,
                                             const std::string &arm_select,
                                             const std::string &pin) {
   if (alarm_entity_id_.empty()) {
-    ESP_LOGE(TAG, "Alarm entity ID not configured");
+    ESP_LOGE(TAG, "Alarm entity ID not set");
     return;
   }
 
@@ -85,59 +88,73 @@ void K1ArmHandlerComponent::execute_command(const std::string &prefix,
   bool skip_delay_flag = (prefix == skip_delay_prefix_);
 
   ESP_LOGI(TAG,
-           "Executing alarm command - mode=%s pin='%s' force=%s skip_delay=%s (prefix='%s')",
+           "Execute - mode=%s pin='%s' force=%s skip_delay=%s (prefix='%s')",
            arm_select.c_str(), pin.c_str(),
            force_flag ? "true" : "false",
            skip_delay_flag ? "true" : "false",
            prefix.c_str());
 
   if (arm_select == "disarm") {
-    this->call_disarm_(pin);
+    call_disarm_(pin);
   } else {
-    this->call_arm_(arm_select, pin, force_flag, skip_delay_flag);
+    call_arm_(arm_select, pin, force_flag, skip_delay_flag);
   }
 }
 
+// ------------------ Service Helpers ------------------
 void K1ArmHandlerComponent::call_disarm_(const std::string &pin) {
-  if (disarm_service_.empty()) {
-    ESP_LOGE(TAG, "Disarm service string is empty");
+#ifdef USE_API
+  if (api::global_api_server == nullptr) {
+    ESP_LOGW(TAG, "API server not ready; cannot call disarm service");
     return;
   }
-  ESP_LOGI(TAG, "Calling disarm service '%s' entity='%s'",
+  if (disarm_service_.empty()) {
+    ESP_LOGE(TAG, "Disarm service string empty");
+    return;
+  }
+  ESP_LOGI(TAG, "HA service disarm: %s entity=%s",
            disarm_service_.c_str(), alarm_entity_id_.c_str());
 
-  // Use bools and strings directly; ESPHome will coerce types.
-  std::vector<api::CustomAPIDevice::ServiceCallArgument> data{
-      {"entity_id", alarm_entity_id_},
-      {"code", pin}
-  };
+  std::map<std::string, std::string> data;
+  data["entity_id"] = alarm_entity_id_;
+  data["code"] = pin;
 
-  this->call_homeassistant_service(disarm_service_, data);
+  api::global_api_server->call_homeassistant_service(disarm_service_, data);
+#else
+  ESP_LOGW(TAG, "API not compiled in; cannot disarm");
+#endif
 }
 
 void K1ArmHandlerComponent::call_arm_(const std::string &mode,
                                       const std::string &pin,
                                       bool force_flag,
                                       bool skip_delay_flag) {
-  if (arm_service_.empty()) {
-    ESP_LOGE(TAG, "Arm service string is empty");
+#ifdef USE_API
+  if (api::global_api_server == nullptr) {
+    ESP_LOGW(TAG, "API server not ready; cannot call arm service");
     return;
   }
-  ESP_LOGI(TAG, "Calling arm service '%s' entity='%s' mode=%s force=%s skip_delay=%s",
+  if (arm_service_.empty()) {
+    ESP_LOGE(TAG, "Arm service string empty");
+    return;
+  }
+  ESP_LOGI(TAG, "HA service arm: %s entity=%s mode=%s force=%s skip_delay=%s",
            arm_service_.c_str(), alarm_entity_id_.c_str(),
            mode.c_str(),
            force_flag ? "true" : "false",
            skip_delay_flag ? "true" : "false");
 
-  std::vector<api::CustomAPIDevice::ServiceCallArgument> data{
-      {"entity_id", alarm_entity_id_},
-      {"mode", mode},
-      {"code", pin},
-      {"force", force_flag},
-      {"skip_delay", skip_delay_flag}
-  };
+  std::map<std::string, std::string> data;
+  data["entity_id"] = alarm_entity_id_;
+  data["mode"] = mode;
+  data["code"] = pin;
+  data["force"] = force_flag ? "true" : "false";
+  data["skip_delay"] = skip_delay_flag ? "true" : "false";
 
-  this->call_homeassistant_service(arm_service_, data);
+  api::global_api_server->call_homeassistant_service(arm_service_, data);
+#else
+  ESP_LOGW(TAG, "API not compiled in; cannot arm");
+#endif
 }
 
 }  // namespace k1_arm_handler
