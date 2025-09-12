@@ -10,7 +10,6 @@ static inline uint32_t now_ms() { return (uint32_t)(esp_timer_get_time()/1000ULL
 
 void K1AlarmListener::register_ha_connection_sensor(binary_sensor::BinarySensor *bs) {
   ha_connection_sensor_ = bs;
-  // update once
   update_connection_sensor_(last_api_connected_);
 }
 
@@ -28,17 +27,14 @@ void K1AlarmListener::setup() {
     return;
   }
 
-  // Subscribe
   this->subscribe_homeassistant_state(&K1AlarmListener::ha_state_callback_, alarm_entity_);
   subscription_started_ = true;
   ESP_LOGI(TAG, "Subscribed to state of '%s'", alarm_entity_.c_str());
 
-  // Attributes (always subscribe; logic decides its usage)
   this->subscribe_homeassistant_state(&K1AlarmListener::arm_mode_attr_callback_, alarm_entity_, "arm_mode");
   this->subscribe_homeassistant_state(&K1AlarmListener::next_state_attr_callback_, alarm_entity_, "next_state");
   this->subscribe_homeassistant_state(&K1AlarmListener::bypassed_attr_callback_, alarm_entity_, "bypassed_sensors");
 
-  // Service
   this->register_service(&K1AlarmListener::failed_arm_service_, "failed_arm", {"reason"});
 
   last_api_connected_ = api_connected_now_();
@@ -56,8 +52,6 @@ void K1AlarmListener::loop() {
     handling_.set_connection(connected);
     state_main_.schedule_publish();
   }
-
-  // Tick handling (override expiry etc.)
   state_main_.on_loop(now_ms());
 }
 
@@ -68,10 +62,10 @@ void K1AlarmListener::dump_config() {
   ESP_LOGCONFIG(TAG, "  Failed Open Sensors Timeout: %u ms", (unsigned) failed_open_sensors_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Subscriptions started: %s", subscription_started_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  API Connected (last): %s", last_api_connected_ ? "YES":"NO");
-  ESP_LOGCONFIG(TAG, "  Last Published: %s", state_main_.last_published().c_str());
   ESP_LOGCONFIG(TAG, "  Override Active: %s", handling_.override_active() ? "YES":"NO");
   if (handling_.override_active())
     ESP_LOGCONFIG(TAG, "    Override State: %s", handling_.override_state().c_str());
+  ESP_LOGCONFIG(TAG, "  Last Published: %s", state_main_.last_published().c_str());
 }
 
 bool K1AlarmListener::api_connected_now_() const {
@@ -88,7 +82,6 @@ void K1AlarmListener::update_connection_sensor_(bool connected) {
     ha_connection_sensor_->publish_state(connected);
 }
 
-// ---- HA Callbacks delegate to api layer ----
 void K1AlarmListener::ha_state_callback_(std::string s) { api_.ha_state_callback(std::move(s)); }
 void K1AlarmListener::arm_mode_attr_callback_(std::string v) { api_.attr_arm_mode_callback(std::move(v)); }
 void K1AlarmListener::next_state_attr_callback_(std::string v) { api_.attr_next_state_callback(std::move(v)); }
