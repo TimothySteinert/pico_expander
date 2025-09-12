@@ -12,30 +12,35 @@ SetModeAction = test_states_ns.class_("SetModeAction", automation.Action)
 CONF_INITIAL_MODE = "initial_mode"
 CONF_MODE = "mode"
 
-# Fixed mode keys
+# Hard-coded mode keys
 MODE_KEYS = ["mode1", "mode2", "mode3", "mode4", "mode5"]
 
 MULTI_CONF = True
 
-# Each mode key: list of automation blocks (each with then:)
-MODE_AUTOMATION_SCHEMA = automation.validate_automation(single=False)
+# Define our own automation block schema so we control the trigger type.
+# Each block:
+#   - auto-generated trigger id (ModeTrigger)
+#   - required 'then' list of standard actions
+MODE_AUTOMATION_BLOCK = cv.Schema(
+    {
+        cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(ModeTrigger),
+        cv.Required("then"): cv.ensure_list(automation.ACTION_SCHEMA),
+    }
+)
 
-def _mode_block(value):
-    # Allow a single automation dict or a list of them
+def _mode_list_schema(value):
+    # Allow either a single block or a list of blocks
     if isinstance(value, list):
-        return MODE_AUTOMATION_SCHEMA(value)
-    # Single dict -> wrap
-    return MODE_AUTOMATION_SCHEMA([value])
+        return [MODE_AUTOMATION_BLOCK(v) for v in value]
+    return [MODE_AUTOMATION_BLOCK(value)]
 
-SCHEMA_MODES = {
-    cv.Optional(mk): _mode_block for mk in MODE_KEYS
-}
+SCHEMA_MODES = {cv.Optional(mk): _mode_list_schema for mk in MODE_KEYS}
 
 COMPONENT_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(TestStatesComponent),
         cv.Optional(CONF_INITIAL_MODE): cv.one_of(*MODE_KEYS, lower=True),
-        **SCHEMA_MODES
+        **SCHEMA_MODES,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -65,25 +70,21 @@ async def to_code(config):
         await cg.register_component(var, comp_conf)
 
         initial_mode = comp_conf.get(CONF_INITIAL_MODE)
-
-        # Track the first defined mode in case initial_mode omitted
         first_defined = None
 
         for mk in MODE_KEYS:
             if mk in comp_conf:
                 if first_defined is None:
                     first_defined = mk
-                # comp_conf[mk] is a list of automation entries (each already validated)
-                for auto_conf in comp_conf[mk]:
-                    trig = cg.new_Pvariable(auto_conf[automation.CONF_TRIGGER_ID])
+                for block in comp_conf[mk]:
+                    trig = cg.new_Pvariable(block[automation.CONF_TRIGGER_ID])
                     cg.add(getattr(var, f"add_{mk}_trigger")(trig))
-                    await automation.build_automation(trig, [], auto_conf)
+                    # Build the automation (no args passed to trigger)
+                    await automation.build_automation(trig, [], block)
 
-        # Set starting mode
         if initial_mode is not None:
             cg.add(var.set_initial_mode(initial_mode))
         elif first_defined is not None:
             cg.add(var.set_initial_mode(first_defined))
         else:
-            # No modes defined; default to mode1
             cg.add(var.set_initial_mode("mode1"))
