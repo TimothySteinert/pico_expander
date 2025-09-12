@@ -19,9 +19,15 @@ enum class K1AlarmListenerBinarySensorType : uint8_t {
   HA_CONNECTED = 0
 };
 
+enum class AlarmIntegrationType : uint8_t {
+  ALARMO = 0,
+  OTHER = 1
+};
+
 class K1AlarmListener : public Component, public api::CustomAPIDevice {
  public:
   void set_alarm_entity(const std::string &e) { alarm_entity_ = e; }
+  void set_alarm_type(uint8_t t) { alarm_type_ = static_cast<AlarmIntegrationType>(t); }
   void set_text_sensor(K1AlarmListenerTextSensor *ts) { main_sensor_ = ts; }
   void register_ha_connection_sensor(binary_sensor::BinarySensor *bs) { ha_connection_sensor_ = bs; }
 
@@ -33,18 +39,21 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
  protected:
   // Configuration
   std::string alarm_entity_;
+  AlarmIntegrationType alarm_type_{AlarmIntegrationType::ALARMO};
 
   // Sensors
   K1AlarmListenerTextSensor *main_sensor_{nullptr};
   binary_sensor::BinarySensor *ha_connection_sensor_{nullptr};
 
-  // State bookkeeping
+  // Connection/state
   bool subscription_started_{false};
   bool last_api_connected_{true};
-  std::string last_published_state_;
-  std::string last_entity_state_mapped_;  // mapped base state (after connection/unavailable mapping)
 
-  // Attribute cache (Alarmo)
+  // Base mapped state (after mapping unknown/unavailable)
+  std::string current_base_state_;
+  std::string last_published_state_;
+
+  // Attribute cache (Alarmo only)
   struct AttrCache {
     std::string arm_mode;
     std::string next_state;
@@ -53,7 +62,12 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
     bool next_state_seen{false};
     bool bypassed_seen{false};
   } attr_;
+
+  // Whether we've ever confirmed attributes exist (for inference)
   bool attributes_supported_{false};
+
+  // Waiting flag: true if we are holding publication until required attributes are present.
+  bool waiting_for_attributes_{false};
 
   // Constants
   static constexpr const char *CONNECTION_TIMEOUT_STATE = "connection_timeout";
@@ -69,11 +83,16 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   void update_connection_sensor_(bool connected);
   void enforce_connection_state_();
 
-  // Mapping & inference
+  // Logic
   std::string map_alarm_state_(const std::string &raw) const;
-  std::string compute_inferred_state_() const;  // uses mapped base + attributes
-  void maybe_publish_updated_state_();
+  bool state_requires_attributes_(const std::string &mapped) const;
+  bool have_required_attributes_for_state_(const std::string &mapped) const;
+  std::string compute_inferred_state_(const std::string &mapped) const;
+  void attempt_publish_alarmo_();  // tries to publish if requirements satisfied
   bool is_truthy_attr_list_(const std::string &v) const;
+
+  // Helpers
+  static bool attr_has_value_(const std::string &v);
   static std::string lower_copy_(const std::string &s);
   static std::string trim_copy_(const std::string &s);
 
@@ -88,7 +107,6 @@ class K1AlarmListenerTextSensor : public text_sensor::TextSensor, public Compone
     if (parent_) parent_->set_text_sensor(this);
   }
   void dump_config() override {}
-
  protected:
   K1AlarmListener *parent_{nullptr};
 };
@@ -102,7 +120,6 @@ class K1AlarmListenerBinarySensor : public binary_sensor::BinarySensor, public C
       parent_->register_ha_connection_sensor(this);
   }
   void dump_config() override {}
-
  protected:
   K1AlarmListener *parent_{nullptr};
   K1AlarmListenerBinarySensorType type_{K1AlarmListenerBinarySensorType::HA_CONNECTED};
