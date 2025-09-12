@@ -16,12 +16,9 @@ static inline std::string trim_copy(const std::string &s) {
   return s.substr(a,b-a);
 }
 
-// PUBLIC API ---------------------------------------------------
-
 void K1AlarmStateHandling::set_connection(bool connected) {
   if (api_connected_ == connected) return;
   api_connected_ = connected;
-  // Connection loss => show connection_timeout (clear override)
   if (!api_connected_) {
     clear_override_();
   }
@@ -35,52 +32,42 @@ void K1AlarmStateHandling::on_raw_state(const std::string &raw_state) {
     waiting_for_transitional_attrs_ = false;
     publish_retry_count_ = 0;
     mark_dirty_();
-  } else {
-    // Same base, no immediate effect unless transitional waiting logic triggers
   }
 }
 
 void K1AlarmStateHandling::on_attr_arm_mode(const std::string &v) {
   attr_.arm_mode = trim_copy(v);
-  bool seen_before = attr_.arm_mode_seen;
+  bool before = attr_.arm_mode_seen;
   attr_.arm_mode_seen = attr_has_value_(attr_.arm_mode);
-  if (attr_.arm_mode_seen && !seen_before) attributes_supported_ = true;
-  // Might disambiguate transitional
-  if (is_transitional_(base_state_mapped_))
-    mark_dirty_();
+  if (attr_.arm_mode_seen && !before) attributes_supported_ = true;
+  if (is_transitional_(base_state_mapped_)) mark_dirty_();
 }
 
 void K1AlarmStateHandling::on_attr_next_state(const std::string &v) {
   attr_.next_state = trim_copy(v);
-  bool seen_before = attr_.next_state_seen;
+  bool before = attr_.next_state_seen;
   attr_.next_state_seen = attr_has_value_(attr_.next_state);
-  if (attr_.next_state_seen && !seen_before) attributes_supported_ = true;
-  if (is_transitional_(base_state_mapped_))
-    mark_dirty_();
+  if (attr_.next_state_seen && !before) attributes_supported_ = true;
+  if (is_transitional_(base_state_mapped_)) mark_dirty_();
 }
 
 void K1AlarmStateHandling::on_attr_bypassed(const std::string &v) {
   attr_.bypassed = trim_copy(v);
-  bool seen_before = attr_.bypassed_seen;
+  bool before = attr_.bypassed_seen;
   attr_.bypassed_seen = attr_has_value_(attr_.bypassed);
-  if (attr_.bypassed_seen && !seen_before) attributes_supported_ = true;
-  // Bypass arrival can upgrade an already-published armed_* state
-  mark_dirty_();
+  if (attr_.bypassed_seen && !before) attributes_supported_ = true;
+  mark_dirty_(); // may upgrade armed_* to *_bypass
 }
 
 void K1AlarmStateHandling::on_failed_arm_reason(const std::string &reason) {
   if (!api_connected_) return;
-  if (base_state_mapped_.empty() ||
-      base_state_mapped_ == "connection_timeout") return;
-
+  if (base_state_mapped_.empty() || base_state_mapped_ == "connection_timeout") return;
   std::string r = lower_copy(trim_copy(reason));
-  uint32_t now_ms = 0; // caller provides tick soon after; we treat 0 as immediate update path
+  uint32_t now_ms = 0;
   if (r == "invalid_code" || r == "not_allowed") {
     start_override_("incorrect_pin", incorrect_pin_timeout_ms_, now_ms);
   } else if (r == "open_sensors") {
     start_override_("failed_open_sensors", failed_open_sensors_timeout_ms_, now_ms);
-  } else {
-    // ignore unknown
   }
 }
 
@@ -92,20 +79,14 @@ void K1AlarmStateHandling::tick(uint32_t now_ms) {
 }
 
 std::string K1AlarmStateHandling::current_effective_state(uint32_t /*now_ms*/) {
-  // Connection timeout has global precedence
   if (!api_connected_ || base_state_mapped_ == "connection_timeout" || base_state_mapped_.empty())
     return "connection_timeout";
 
-  // Transitional waiting logic (retry gating) replicates earlier coalesced logic.
   if (is_transitional_(base_state_mapped_)) {
     if (!have_transitional_attrs_(base_state_mapped_)) {
-      // Fallback after MAX_PUBLISH_RETRIES was previously handled by schedule loop
-      // Here we show generic transitional if we exhausted retries, else keep placeholder (connection_timeout).
       if (publish_retry_count_ >= MAX_PUBLISH_RETRIES) {
-        // show generic transitional
         return base_state_mapped_;
       } else {
-        // still waiting => show connection_timeout placeholder outside
         return "connection_timeout";
       }
     }
@@ -117,8 +98,7 @@ std::string K1AlarmStateHandling::current_effective_state(uint32_t /*now_ms*/) {
   return underlying;
 }
 
-// PRIVATE ------------------------------------------------------
-
+// ----- Internal helpers -----
 std::string K1AlarmStateHandling::map_raw_state_(const std::string &raw) const {
   std::string r = lower_copy(trim_copy(raw));
   if (r == "unavailable" || r == "unknown")
@@ -127,7 +107,7 @@ std::string K1AlarmStateHandling::map_raw_state_(const std::string &raw) const {
 }
 
 bool K1AlarmStateHandling::is_transitional_(const std::string &mapped) const {
-  return (mapped == "arming" || mapped == "pending");
+  return mapped == "arming" || mapped == "pending";
 }
 
 bool K1AlarmStateHandling::have_transitional_attrs_(const std::string &mapped) const {
@@ -157,7 +137,6 @@ std::string K1AlarmStateHandling::compute_effective_without_override_() const {
 
 std::string K1AlarmStateHandling::infer_state_core_(const std::string &mapped) const {
   if (alarm_type_ != AlarmIntegrationType::ALARMO) return mapped;
-
   if (mapped == "connection_timeout") return mapped;
 
   std::string arm_mode = lower_copy(trim_copy(attr_.arm_mode));
@@ -172,20 +151,19 @@ std::string K1AlarmStateHandling::infer_state_core_(const std::string &mapped) c
     if (arm_mode == "armed_custom_bypass") return "arming_custom";
     return mapped;
   }
-
   if (mapped == "pending") {
-    if (arm_mode == "armed_home"     || next_state == "armed_home")     return "pending_home";
-    if (arm_mode == "armed_away"     || next_state == "armed_away")     return "pending_away";
-    if (arm_mode == "armed_night"    || next_state == "armed_night")    return "pending_night";
+    if (arm_mode == "armed_home" || next_state == "armed_home") return "pending_home";
+    if (arm_mode == "armed_away" || next_state == "armed_away") return "pending_away";
+    if (arm_mode == "armed_night" || next_state == "armed_night") return "pending_night";
     if (arm_mode == "armed_vacation" || next_state == "armed_vacation") return "pending_vacation";
     if (arm_mode == "armed_custom_bypass" || next_state == "armed_custom_bypass") return "pending_custom";
     return mapped;
   }
 
-  if (mapped == "armed_home")       return bypassed_non_empty ? "armed_home_bypass" : "armed_home";
-  if (mapped == "armed_away")       return bypassed_non_empty ? "armed_away_bypass" : "armed_away";
-  if (mapped == "armed_night")      return bypassed_non_empty ? "armed_night_bypass" : "armed_night";
-  if (mapped == "armed_vacation")   return bypassed_non_empty ? "armed_vacation_bypass" : "armed_vacation";
+  if (mapped == "armed_home")     return bypassed_non_empty ? "armed_home_bypass" : "armed_home";
+  if (mapped == "armed_away")     return bypassed_non_empty ? "armed_away_bypass" : "armed_away";
+  if (mapped == "armed_night")    return bypassed_non_empty ? "armed_night_bypass" : "armed_night";
+  if (mapped == "armed_vacation") return bypassed_non_empty ? "armed_vacation_bypass" : "armed_vacation";
   if (mapped == "armed_custom_bypass")
     return bypassed_non_empty ? "armed_custom_bypass" : "armed_custom";
 
@@ -195,8 +173,7 @@ std::string K1AlarmStateHandling::infer_state_core_(const std::string &mapped) c
 void K1AlarmStateHandling::start_override_(const std::string &st, uint32_t dur_ms, uint32_t now_ms) {
   override_active_ = true;
   override_state_ = st;
-  // If now_ms==0 treat as unknown caller time; override_end_ms_ is still valid after first tick
-  override_end_ms_ = now_ms ? (now_ms + dur_ms) : dur_ms; // simple fallback; corrected on first tick
+  override_end_ms_ = now_ms ? (now_ms + dur_ms) : dur_ms;
   mark_dirty_();
 }
 
