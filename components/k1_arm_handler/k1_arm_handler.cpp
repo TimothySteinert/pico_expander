@@ -6,7 +6,7 @@ namespace k1_arm_handler {
 
 static const char *const TAG = "k1_arm_handler";
 
-// -------- Mapping Helpers --------
+// ---------------- Helpers ----------------
 std::string K1ArmHandlerComponent::map_digit_(uint8_t code) const {
   switch (code) {
     case 0x05: return "1";
@@ -28,26 +28,28 @@ const char *K1ArmHandlerComponent::map_arm_select_(uint8_t code) const {
     case 0x41: return "away";
     case 0x42: return "home";
     case 0x43: return "disarm";
+    case 0x44: return "night";    // (if future keypad codes)
+    case 0x45: return "vacation";
+    case 0x46: return "bypass";
     default:   return "unknown";
   }
 }
 
-// -------- Frame Parser --------
+// ---------------- Frame Parser ----------------
 void K1ArmHandlerComponent::handle_a0_message(const std::vector<uint8_t> &bytes) {
   if (bytes.size() < 21) {
-    ESP_LOGW(TAG, "A0 message too short (%u)", (unsigned) bytes.size());
+    ESP_LOGW(TAG, "A0 frame too short (%u)", (unsigned) bytes.size());
     return;
   }
   if (bytes[0] != 0xA0) {
-    ESP_LOGV(TAG, "Not an A0 frame (first=0x%02X)", bytes[0]);
+    ESP_LOGV(TAG, "Ignoring non-A0 frame (0x%02X)", bytes[0]);
     return;
   }
 
   std::string prefix;
   for (int i = 1; i <= 3; i++) {
-    if (bytes[i] != 0xFF) {
+    if (bytes[i] != 0xFF)
       prefix += map_digit_(bytes[i]);
-    }
   }
 
   std::string arm_select;
@@ -56,24 +58,23 @@ void K1ArmHandlerComponent::handle_a0_message(const std::vector<uint8_t> &bytes)
 
   std::string pin;
   for (int i = 5; i < 21; i++) {
-    if (bytes[i] != 0xFF) {
+    if (bytes[i] != 0xFF)
       pin += map_digit_(bytes[i]);
-    }
   }
 
   if (arm_select.empty() || arm_select == "unknown" || pin.empty()) {
-    ESP_LOGW(TAG, "Invalid A0 frame: arm_select='%s' pin_len=%u",
+    ESP_LOGW(TAG, "Invalid A0 contents (mode='%s' pin_len=%u)",
              arm_select.c_str(), (unsigned) pin.size());
     return;
   }
 
-  ESP_LOGD(TAG, "Parsed A0 -> prefix='%s' arm_select='%s' pin='%s'",
+  ESP_LOGD(TAG, "Parsed A0 -> prefix='%s' mode='%s' pin='%s'",
            prefix.c_str(), arm_select.c_str(), pin.c_str());
 
   execute_command(prefix, arm_select, pin);
 }
 
-// -------- Execute Command --------
+// ---------------- Execute Command ----------------
 void K1ArmHandlerComponent::execute_command(const std::string &prefix,
                                             const std::string &arm_select,
                                             const std::string &pin) {
@@ -81,7 +82,7 @@ void K1ArmHandlerComponent::execute_command(const std::string &prefix,
   bool skip_delay_flag = (prefix == skip_delay_prefix_);
 
   ESP_LOGI(TAG,
-           "Execute - mode=%s pin='%s' force=%s skip_delay=%s (prefix='%s')",
+           "Execute - mode=%s pin='%s' force=%s skip_delay=%s prefix='%s'",
            arm_select.c_str(), pin.c_str(),
            force_flag ? "true" : "false",
            skip_delay_flag ? "true" : "false",
@@ -90,24 +91,24 @@ void K1ArmHandlerComponent::execute_command(const std::string &prefix,
   invoke_script_(arm_select, pin, force_flag, skip_delay_flag, prefix);
 }
 
-// -------- Invoke Script --------
+// ---------------- Invoke Script ----------------
 void K1ArmHandlerComponent::invoke_script_(const std::string &mode,
                                            const std::string &pin,
                                            bool force_flag,
                                            bool skip_delay_flag,
                                            const std::string &prefix) {
-  if (!callback_script_) {
-    ESP_LOGW(TAG, "No callback script configured; skipping.");
+  if (!script_ptr_) {
+    ESP_LOGW(TAG, "No callback script pointer set; skipping.");
     return;
   }
-  // Pass booleans as "1"/"0" string flags to match YAML (string) parameter types.
-  callback_script_->execute(
-      mode,
-      pin,
-      force_flag ? std::string("1") : std::string("0"),
-      skip_delay_flag ? std::string("1") : std::string("0"),
-      prefix
-  );
+
+  auto *scr = reinterpret_cast<ConcreteScript *>(script_ptr_);
+  // Convert bools to "1"/"0" as expected by YAML string parameters
+  scr->execute(mode,
+               pin,
+               force_flag ? std::string("1") : std::string("0"),
+               skip_delay_flag ? std::string("1") : std::string("0"),
+               prefix);
 }
 
 }  // namespace k1_arm_handler
