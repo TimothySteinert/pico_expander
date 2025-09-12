@@ -7,48 +7,46 @@ test_states_ns = cg.esphome_ns.namespace("test_states")
 
 TestStatesComponent = test_states_ns.class_("TestStatesComponent", cg.Component)
 ModeTrigger = test_states_ns.class_("ModeTrigger", automation.Trigger)
+PreModeTrigger = test_states_ns.class_("PreModeTrigger", automation.Trigger)
 SetModeAction = test_states_ns.class_("SetModeAction", automation.Action)
 
 CONF_INITIAL_MODE = "initial_mode"
 CONF_MODE = "mode"
+CONF_INTERMODE = "intermode"
 
 MODE_KEYS = ["mode1", "mode2", "mode3", "mode4", "mode5"]
 
 MULTI_CONF = True
 
-# Validator for an automation whose trigger is ModeTrigger
+# Validators for automation blocks returning a list of trigger dicts
 MODE_AUTOMATION = automation.validate_automation({
     cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(ModeTrigger),
 })
+INTERMODE_AUTOMATION = automation.validate_automation({
+    cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(PreModeTrigger),
+})
 
-def _automation_blocks(value):
-    """
-    Accept either:
-      modeX:
-        then:
-          - logger.log: "..."
-    or:
-      modeX:
-        - then:
-            - logger.log: "..."
-        - then:
-            - logger.log: "second block"
-    Returns a FLAT list of trigger dicts.
-    """
-    flat = []
-    if isinstance(value, list):
-        for item in value:
-            flat.extend(MODE_AUTOMATION(item))  # each call returns a list
-    else:
-        flat.extend(MODE_AUTOMATION(value))
-    return flat
+def _automation_blocks(validator):
+    def inner(value):
+        flat = []
+        if isinstance(value, list):
+            for item in value:
+                flat.extend(validator(item))
+        else:
+            flat.extend(validator(value))
+        return flat
+    return inner
 
-SCHEMA_MODES = {cv.Optional(mk): _automation_blocks for mk in MODE_KEYS}
+mode_blocks_validator = _automation_blocks(MODE_AUTOMATION)
+intermode_blocks_validator = _automation_blocks(INTERMODE_AUTOMATION)
+
+SCHEMA_MODES = {cv.Optional(mk): mode_blocks_validator for mk in MODE_KEYS}
 
 COMPONENT_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(TestStatesComponent),
         cv.Optional(CONF_INITIAL_MODE): cv.one_of(*MODE_KEYS, lower=True),
+        cv.Optional(CONF_INTERMODE): intermode_blocks_validator,
         **SCHEMA_MODES,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -78,12 +76,19 @@ async def to_code(config):
         var = cg.new_Pvariable(comp_conf[CONF_ID])
         await cg.register_component(var, comp_conf)
 
+        # Intermode (pre-transition) triggers
+        inter_trigs = comp_conf.get(CONF_INTERMODE, [])
+        for trig_conf in inter_trigs:
+            ptr = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
+            cg.add(var.add_inter_mode_trigger(ptr))
+            await automation.build_automation(ptr, [], trig_conf)
+
         first_defined = None
         for mk in MODE_KEYS:
             triggers = comp_conf.get(mk, [])
             if triggers and first_defined is None:
                 first_defined = mk
-            for trig_conf in triggers:  # Already flat list of dicts
+            for trig_conf in triggers:
                 trig = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
                 cg.add(getattr(var, f"add_{mk}_trigger")(trig))
                 await automation.build_automation(trig, [], trig_conf)
