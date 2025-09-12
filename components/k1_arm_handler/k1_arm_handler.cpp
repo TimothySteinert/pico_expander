@@ -1,12 +1,7 @@
 #include "k1_arm_handler.h"
 #include "esphome/core/log.h"
-
-#ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #include "esphome/components/api/api_connection.h"
-#endif
-
-#include <map>
 
 namespace esphome {
 namespace k1_arm_handler {
@@ -93,9 +88,13 @@ void K1ArmHandlerComponent::execute_command(const std::string &prefix,
   bool force_flag = (prefix == force_prefix_);
   bool skip_delay_flag = (prefix == skip_delay_prefix_);
 
+  // If you want to mask the pin in logs:
+  // std::string pin_for_log(pin.size() ? "****" : "");
+  const std::string &pin_for_log = pin;
+
   ESP_LOGI(TAG,
            "Execute - mode=%s pin='%s' force=%s skip_delay=%s (prefix='%s')",
-           arm_select.c_str(), pin.c_str(),
+           arm_select.c_str(), pin_for_log.c_str(),
            force_flag ? "true" : "false",
            skip_delay_flag ? "true" : "false",
            prefix.c_str());
@@ -109,16 +108,12 @@ void K1ArmHandlerComponent::execute_command(const std::string &prefix,
 
 // ------------------ Service Helpers ------------------
 void K1ArmHandlerComponent::call_disarm_(const std::string &pin) {
-#ifndef USE_API
-  ESP_LOGW(TAG, "API not compiled; cannot disarm");
-  return;
-#else
-  if (api::global_api_server == nullptr) {
-    ESP_LOGW(TAG, "API server not ready; cannot disarm");
-    return;
-  }
   if (disarm_service_.empty()) {
     ESP_LOGE(TAG, "Disarm service string empty");
+    return;
+  }
+  if (api::global_api_server == nullptr) {
+    ESP_LOGW(TAG, "API server not ready (disarm) - will not send");
     return;
   }
 
@@ -131,23 +126,18 @@ void K1ArmHandlerComponent::call_disarm_(const std::string &pin) {
   req.data["code"] = pin;
 
   api::global_api_server->send_homeassistant_service_call(req);
-#endif
 }
 
 void K1ArmHandlerComponent::call_arm_(const std::string &mode,
                                       const std::string &pin,
                                       bool force_flag,
                                       bool skip_delay_flag) {
-#ifndef USE_API
-  ESP_LOGW(TAG, "API not compiled; cannot arm");
-  return;
-#else
-  if (api::global_api_server == nullptr) {
-    ESP_LOGW(TAG, "API server not ready; cannot arm");
-    return;
-  }
   if (arm_service_.empty()) {
     ESP_LOGE(TAG, "Arm service string empty");
+    return;
+  }
+  if (api::global_api_server == nullptr) {
+    ESP_LOGW(TAG, "API server not ready (arm) - will not send");
     return;
   }
 
@@ -159,15 +149,15 @@ void K1ArmHandlerComponent::call_arm_(const std::string &mode,
 
   api::HomeAssistantServiceCallRequest req;
   req.service = arm_service_;
-  req.data["entity_id"]   = alarm_entity_id_;
-  req.data["mode"]        = mode;
-  req.data["code"]        = pin;
-  req.data["force"]       = force_flag ? "true" : "false";
-  req.data["skip_delay"]  = skip_delay_flag ? "true" : "false";
+  req.data["entity_id"]  = alarm_entity_id_;
+  req.data["mode"]       = mode;
+  req.data["code"]       = pin;
+  // Alarmo expects booleans; HA service API will coerce strings "true"/"false" or actual bool.
+  req.data["force"]      = force_flag ? "true" : "false";
+  req.data["skip_delay"] = skip_delay_flag ? "true" : "false";
 
   api::global_api_server->send_homeassistant_service_call(req);
-#endif
 }
 
 }  // namespace k1_arm_handler
-}  // namespace esphome
+}  // namespace esphhome
