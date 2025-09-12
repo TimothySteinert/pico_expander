@@ -1,52 +1,134 @@
-#include "test_states.h"
-#include "esphome/core/log.h"
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome import automation
+from esphome.const import CONF_ID
 
-namespace esphome {
-namespace test_states {
+test_states_ns = cg.esphome_ns.namespace("test_states")
 
-static const char *const TAG = "test_states";
+TestStatesComponent = test_states_ns.class_("TestStatesComponent", cg.Component)
+ModeTrigger = test_states_ns.class_("ModeTrigger", automation.Trigger)
+PreModeTrigger = test_states_ns.class_("PreModeTrigger", automation.Trigger)
+SetModeAction = test_states_ns.class_("SetModeAction", automation.Action)
 
-void TestStatesComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "Test States Component:");
-  ESP_LOGCONFIG(TAG, "  Current Mode: %s", current_mode_.c_str());
-  ESP_LOGCONFIG(TAG, "  intermode triggers: %u", (unsigned) intermode_trigs_.size());
-  ESP_LOGCONFIG(TAG, "  mode1 triggers: %u", (unsigned) mode1_trigs_.size());
-  ESP_LOGCONFIG(TAG, "  mode2 triggers: %u", (unsigned) mode2_trigs_.size());
-  ESP_LOGCONFIG(TAG, "  mode3 triggers: %u", (unsigned) mode3_trigs_.size());
-  ESP_LOGCONFIG(TAG, "  mode4 triggers: %u", (unsigned) mode4_trigs_.size());
-  ESP_LOGCONFIG(TAG, "  mode5 triggers: %u", (unsigned) mode5_trigs_.size());
-}
+CONF_INITIAL_MODE = "initial_mode"
+CONF_MODE = "mode"
+CONF_INTERMODE = "intermode"
 
-void TestStatesComponent::fire_intermode_() {
-  for (auto *t : intermode_trigs_) if (t) t->trigger();
-}
+# Full fixed mode list
+MODE_KEYS = [
+    "disarmed",
+    "triggered",
+    "connection_timeout",
+    "incorrect_pin",
+    "failed_open_sensors",
 
-void TestStatesComponent::set_mode_by_name(const std::string &name_in) {
-  if (name_in.empty()) return;
-  std::string s = name_in;
-  std::transform(s.begin(), s.end(), s.begin(),
-                 [](unsigned char c){ return (char) std::tolower(c); });
-  if (s == current_mode_) return;
+    "arming",
+    "arming_home",
+    "arming_away",
+    "arming_night",
+    "arming_vacation",
+    "arming_custom_bypass",
 
-  // Run global intermode actions first
-  fire_intermode_();
+    "pending",
+    "pending_home",
+    "pending_away",
+    "pending_night",
+    "pending_vacation",
+    "pending_custom_bypass",
 
-  std::string old = current_mode_;
-  current_mode_ = s;
-  ESP_LOGI(TAG, "Mode changed: '%s' -> '%s'", old.c_str(), current_mode_.c_str());
-  fire_for_mode_(current_mode_);
-}
+    "armed_home",
+    "armed_away",
+    "armed_night",
+    "armed_vacation",
 
-void TestStatesComponent::fire_for_mode_(const std::string &mode) {
-  const std::vector<ModeTrigger*> *vec = nullptr;
-  if (mode == "mode1") vec = &mode1_trigs_;
-  else if (mode == "mode2") vec = &mode2_trigs_;
-  else if (mode == "mode3") vec = &mode3_trigs_;
-  else if (mode == "mode4") vec = &mode4_trigs_;
-  else if (mode == "mode5") vec = &mode5_trigs_;
-  if (!vec) return;
-  for (auto *t : *vec) if (t) t->trigger();
-}
+    "armed_home_bypass",
+    "armed_away_bypass",
+    "armed_night_bypass",
+    "armed_vacation_bypass",
+    "armed_custom_bypass",
+]
 
-}  // namespace test_states
-}  // namespace esphome
+MULTI_CONF = True
+
+MODE_AUTOMATION = automation.validate_automation({
+    cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(ModeTrigger),
+})
+INTERMODE_AUTOMATION = automation.validate_automation({
+    cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(PreModeTrigger),
+})
+
+def _automation_blocks(validator):
+    def inner(value):
+        flat = []
+        if isinstance(value, list):
+            for item in value:
+                flat.extend(validator(item))
+        else:
+            flat.extend(validator(value))
+        return flat
+    return inner
+
+mode_blocks_validator = _automation_blocks(MODE_AUTOMATION)
+intermode_blocks_validator = _automation_blocks(INTERMODE_AUTOMATION)
+
+SCHEMA_MODES = {cv.Optional(mk): mode_blocks_validator for mk in MODE_KEYS}
+
+COMPONENT_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(TestStatesComponent),
+        cv.Optional(CONF_INITIAL_MODE): cv.one_of(*MODE_KEYS, lower=True),
+        cv.Optional(CONF_INTERMODE): intermode_blocks_validator,
+        **SCHEMA_MODES,
+    }
+).extend(cv.COMPONENT_SCHEMA)
+
+CONFIG_SCHEMA = cv.All(cv.ensure_list(COMPONENT_SCHEMA))
+
+@automation.register_action(
+    "test_states.set_mode",
+    SetModeAction,
+    cv.Schema(
+        {
+            cv.Required(CONF_ID): cv.use_id(TestStatesComponent),
+            cv.Required(CONF_MODE): cv.templatable(cv.one_of(*MODE_KEYS, lower=True)),
+        }
+    ),
+)
+async def test_states_set_mode_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    action = cg.new_Pvariable(action_id, template_arg, parent)
+    mode_expr = await cg.templatable(config[CONF_MODE], args, cg.std_string)
+    cg.add(action.set_mode(mode_expr))
+    return action
+
+
+async def to_code(config):
+    for comp_conf in config:
+        var = cg.new_Pvariable(comp_conf[CONF_ID])
+        await cg.register_component(var, comp_conf)
+
+        # Intermode triggers (run before every real transition)
+        inter_trigs = comp_conf.get(CONF_INTERMODE, [])
+        for trig_conf in inter_trigs:
+            ptr = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
+            cg.add(var.add_inter_mode_trigger(ptr))
+            await automation.build_automation(ptr, [], trig_conf)
+
+        first_defined = None
+        for mk in MODE_KEYS:
+            triggers = comp_conf.get(mk, [])
+            if triggers and first_defined is None:
+                first_defined = mk
+            for trig_conf in triggers:
+                trig = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
+                # add_<mode>_trigger
+                cg.add(getattr(var, f"add_{mk}_trigger")(trig))
+                await automation.build_automation(trig, [], trig_conf)
+
+        initial_mode = comp_conf.get(CONF_INITIAL_MODE)
+        if initial_mode is not None:
+            cg.add(var.set_initial_mode(initial_mode))
+        elif first_defined is not None:
+            cg.add(var.set_initial_mode(first_defined))
+        else:
+            cg.add(var.set_initial_mode("disarmed"))
