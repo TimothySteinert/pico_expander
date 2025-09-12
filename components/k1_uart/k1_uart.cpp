@@ -2,9 +2,8 @@
 #include "esphome/core/log.h"
 
 #ifdef USE_ESP32
-// Include the existing external buzzer component's public header.
-// (We DO NOT re-implement or vendor its code.)
 #include "esphome/components/buzzer/buzzer.h"
+#include "esphome/components/k1_arm_handler/k1_arm_handler.h"
 #endif
 
 namespace esphome {
@@ -68,6 +67,7 @@ void K1UartComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Port: UART1  Pins: TX=%d RX=%d  Baud=%d", PIN_TX, PIN_RX, BAUD);
   ESP_LOGCONFIG(TAG, "  Frames: A0=21 bytes, A1=2 bytes");
   ESP_LOGCONFIG(TAG, "  Buzzer linked: %s", buzzer_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Arm Handler linked: %s", arm_handler_ ? "YES" : "NO");
 #else
   ESP_LOGCONFIG(TAG, "  (Unsupported platform build)");
 #endif
@@ -127,25 +127,31 @@ void K1UartComponent::parse_frames_() {
     }
 
     if (size_() < needed)
-      break; // wait for complete frame
+      break; // wait for full frame
 
-    uint8_t frame[LEN_A0]; // largest size
+    uint8_t frame[LEN_A0];
     for (size_t i = 0; i < needed; i++)
       frame[i] = peek_(i);
 
     log_frame_(frame, needed, id);
     pop_(needed);
 
-    // Trigger buzzer key beep on any A1 frame
-    if (id == ID_A1 && buzzer_ != nullptr) {
-      buzzer_->key_beep();
+    if (id == ID_A1) {
+      if (buzzer_ != nullptr) buzzer_->key_beep();
+    } else if (id == ID_A0) {
+      if (arm_handler_ != nullptr) {
+        std::vector<uint8_t> vec(frame, frame + needed);
+        arm_handler_->handle_a0_message(vec);
+      } else {
+        ESP_LOGV(TAG, "A0 received but no arm handler linked");
+      }
     }
   }
 }
 
 // ---------------- Logging ----------------
 void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
-  char hex_part[70];
+  char hex_part[80];
   size_t hpos = 0;
   for (size_t i = 0; i < len; i++) {
     if (hpos + 4 >= sizeof(hex_part)) break;
