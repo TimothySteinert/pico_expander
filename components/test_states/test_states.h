@@ -2,16 +2,17 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/log.h"
+#include <map>
 #include <vector>
 #include <string>
-#include <cstdint>
+#include <algorithm>
 
 namespace esphome {
 namespace test_states {
 
-class TestStatesComponent;  // forward
+class TestStatesComponent;
 
-// A simple trigger tied to a parent component (not strictly needed now, but extensible later)
+// Trigger fired when entering a given mode name
 class ModeTrigger : public Trigger<> {
  public:
   explicit ModeTrigger(TestStatesComponent *parent) : parent_(parent) {}
@@ -19,38 +20,39 @@ class ModeTrigger : public Trigger<> {
   TestStatesComponent *parent_;
 };
 
+// Main component
 class TestStatesComponent : public Component {
  public:
-  enum class Mode : uint8_t {
-    MODE1 = 0,
-    MODE2,
-    MODE3
-  };
-
   void setup() override {}
   void loop() override {}
   void dump_config() override;
 
-  // Change mode
-  void set_mode(Mode m);
+  // Set mode (public APIs)
   void set_mode_by_name(const std::string &name);
-
-  Mode mode() const { return mode_; }
-  std::string mode_string() const;
+  const std::string &current_mode_string() const { return current_mode_; }
 
   // Called from codegen to register triggers
-  void add_mode1_trigger(ModeTrigger *t) { mode1_triggers_.push_back(t); }
-  void add_mode2_trigger(ModeTrigger *t) { mode2_triggers_.push_back(t); }
-  void add_mode3_trigger(ModeTrigger *t) { mode3_triggers_.push_back(t); }
+  void add_mode_trigger(const std::string &mode, ModeTrigger *t);
 
  protected:
-  Mode mode_{Mode::MODE1};
+  std::string current_mode_{"mode1"};
+  std::map<std::string, std::vector<ModeTrigger *>> mode_triggers_;
 
-  std::vector<ModeTrigger*> mode1_triggers_;
-  std::vector<ModeTrigger*> mode2_triggers_;
-  std::vector<ModeTrigger*> mode3_triggers_;
+  void fire_mode_(const std::string &mode);
+};
 
-  void fire_triggers_for_mode_(Mode m);
+// Custom action to set mode
+template<typename... Ts>
+class SetModeAction : public Action<Ts...> {
+ public:
+  explicit SetModeAction(TestStatesComponent *parent) : parent_(parent) {}
+  void set_mode(const std::string &m) { mode_ = m; }
+  void play(Ts... x) override {
+    parent_->set_mode_by_name(mode_);
+  }
+ protected:
+  TestStatesComponent *parent_;
+  std::string mode_;
 };
 
 }  // namespace test_states
