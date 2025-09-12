@@ -1,12 +1,22 @@
 #include "k1_alarm_listener.h"
 #include "esphome/core/log.h"
-#include <algorithm>
-#include <cctype>
 
 namespace esphome {
 namespace k1_alarm_listener {
 
 static const char *const TAG = "k1_alarm_listener";
+
+// ---------- Text sensor registration (handles initial publish order) ----------
+void K1AlarmListener::set_text_sensor(K1AlarmListenerTextSensor *ts) {
+  main_sensor_ = ts;
+  // If we have not published anything yet, start with connection_timeout immediately.
+  if (!initial_state_published_) {
+    publish_initial_connection_timeout_();
+  } else if (!last_published_state_.empty()) {
+    // Re-publish last state so HA sees it (rare race condition)
+    publish_state_if_changed_(last_published_state_);
+  }
+}
 
 // ---------- Setup ----------
 void K1AlarmListener::setup() {
@@ -15,25 +25,31 @@ void K1AlarmListener::setup() {
     return;
   }
 
-  // Always subscribe to base state
+  // Immediately publish boot state (even if sensor not yet set, we mark; actual publish happens when sensor registers)
+  publish_initial_connection_timeout_();
+
+  // Subscribe to base state
   this->subscribe_homeassistant_state(&K1AlarmListener::ha_state_callback_, this->alarm_entity_);
   subscription_started_ = true;
-  ESP_LOGI(TAG, "Subscribed to state of '%s' (type=%s)",
+  ESP_LOGI(TAG, "Subscribed to entity '%s' state (type=%s)",
            alarm_entity_.c_str(),
            alarm_type_ == AlarmIntegrationType::ALARMO ? "alarmo" : "other");
 
-  // Subscribe to attributes only for Alarmo
+  // Only subscribe attributes for Alarmo
   if (alarm_type_ == AlarmIntegrationType::ALARMO) {
     this->subscribe_homeassistant_state(&K1AlarmListener::arm_mode_attr_callback_, this->alarm_entity_, "arm_mode");
     this->subscribe_homeassistant_state(&K1AlarmListener::next_state_attr_callback_, this->alarm_entity_, "next_state");
     this->subscribe_homeassistant_state(&K1AlarmListener::bypassed_attr_callback_, this->alarm_entity_, "bypassed_sensors");
-    ESP_LOGI(TAG, "Attribute subscriptions enabled (arm_mode, next_state, bypassed_sensors)");
+    ESP_LOGI(TAG, "Attribute subscriptions enabled");
   }
 
   bool connected = api_connected_now_();
   last_api_connected_ = connected;
   update_connection_sensor_(connected);
-  if (!connected) enforce_connection_state_();
+  if (!connected) {
+    // Will remain connection_timeout until HA connects and state arrives.
+    ESP_LOGD(TAG, "API not connected at setup; holding connection_timeout");
+  }
 }
 
 void K1AlarmListener::loop() {
@@ -42,7 +58,15 @@ void K1AlarmListener::loop() {
     ESP_LOGI(TAG, "API connection %s", connected ? "RESTORED" : "LOST");
     last_api_connected_ = connected;
     update_connection_sensor_(connected);
-    enforce_connection_state_();
+    if (!connected) {
+      // Force connection_timeout state
+      publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
+      waiting_for_attributes_ = false;
+    } else {
+      // On reconnect we leave connection_timeout until HA sends a state.
+      publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
+      waiting_for_attributes_ = false;
+    }
   }
 }
 
@@ -119,23 +143,22 @@ void K1AlarmListener::ha_state_callback_(std::string state) {
   }
 
   if (alarm_type_ == AlarmIntegrationType::OTHER) {
-    // Immediate publish (raw mapped)
     publish_state_if_changed_(current_base_state_);
     return;
   }
 
   // Alarmo path
   if (state_requires_attributes_(current_base_state_)) {
-    // Decide if we already have what we need
     if (have_required_attributes_for_state_(current_base_state_)) {
       waiting_for_attributes_ = false;
       attempt_publish_alarmo_();
     } else {
       waiting_for_attributes_ = true;
-      ESP_LOGD(TAG, "Holding state '%s' until attributes arrive.", current_base_state_.c_str());
+      // Stay in connection_timeout until attributes arrive.
+      ESP_LOGD(TAG, "Holding '%s' until attributes present; staying at connection_timeout",
+               current_base_state_.c_str());
     }
   } else {
-    // No attributes needed for this state
     waiting_for_attributes_ = false;
     publish_state_if_changed_(compute_inferred_state_(current_base_state_));
   }
@@ -143,10 +166,11 @@ void K1AlarmListener::ha_state_callback_(std::string state) {
 
 // ---------- Requirements ----------
 bool K1AlarmListener::state_requires_attributes_(const std::string &mapped) const {
-  if (mapped == "arming" || mapped == "pending" ||
-      mapped == "armed_home" || mapped == "armed_away") {
-    return true;
-  }
+  // States we further qualify:
+  if (mapped == "arming" || mapped == "pending") return true;
+  if (mapped == "armed_home" || mapped == "armed_away" ||
+      mapped == "armed_night" || mapped == "armed_vacation" ||
+      mapped == "armed_custom_bypass") return true;
   return false;
 }
 
@@ -157,8 +181,7 @@ bool K1AlarmListener::have_required_attributes_for_state_(const std::string &map
   if (mapped == "pending") {
     return attr_.arm_mode_seen || attr_.next_state_seen;
   }
-  if (mapped == "armed_home" || mapped == "armed_away") {
-    // need bypassed_sensors to avoid flicker of base vs bypass variant
+  if (mapped.rfind("armed_", 0) == 0) {
     return attr_.bypassed_seen;
   }
   return true;
@@ -167,10 +190,7 @@ bool K1AlarmListener::have_required_attributes_for_state_(const std::string &map
 // ---------- Attempt Publish (Alarmo) ----------
 void K1AlarmListener::attempt_publish_alarmo_() {
   if (current_base_state_.empty()) return;
-  if (!have_required_attributes_for_state_(current_base_state_)) {
-    // Still waiting
-    return;
-  }
+  if (!have_required_attributes_for_state_(current_base_state_)) return;
   std::string inferred = compute_inferred_state_(current_base_state_);
   publish_state_if_changed_(inferred);
   waiting_for_attributes_ = false;
@@ -190,30 +210,39 @@ std::string K1AlarmListener::compute_inferred_state_(const std::string &mapped) 
 
   if (mapped == CONNECTION_TIMEOUT_STATE) return mapped;
 
-  // If attributes never confirmed we still return base (but since we control publish timing,
-  // this means for 'arming' etc. we only get here once attributes are available).
   std::string arm_mode = lower_copy_(trim_copy_(attr_.arm_mode));
   std::string next_state = lower_copy_(trim_copy_(attr_.next_state));
   bool bypassed_non_empty = is_truthy_attr_list_(attr_.bypassed_sensors);
 
+  // Arming variants
   if (mapped == "arming") {
     if (arm_mode == "armed_home") return "arming_home";
     if (arm_mode == "armed_away") return "arming_away";
+    if (arm_mode == "armed_night") return "arming_night";
+    if (arm_mode == "armed_vacation") return "arming_vacation";
+    if (arm_mode == "armed_custom_bypass") return "arming_custom";
     return mapped;
   }
+
+  // Pending variants
   if (mapped == "pending") {
     if (arm_mode == "armed_home" || next_state == "armed_home") return "pending_home";
     if (arm_mode == "armed_away" || next_state == "armed_away") return "pending_away";
+    if (arm_mode == "armed_night" || next_state == "armed_night") return "pending_night";
+    if (arm_mode == "armed_vacation" || next_state == "armed_vacation") return "pending_vacation";
+    if (arm_mode == "armed_custom_bypass" || next_state == "armed_custom_bypass") return "pending_custom";
     return mapped;
   }
-  if (mapped == "armed_home") {
-    if (bypassed_non_empty) return "armed_home_bypass";
-    return mapped;
+
+  // Armed variants with bypass detection
+  if (mapped == "armed_home")       return bypassed_non_empty ? "armed_home_bypass" : "armed_home";
+  if (mapped == "armed_away")       return bypassed_non_empty ? "armed_away_bypass" : "armed_away";
+  if (mapped == "armed_night")      return bypassed_non_empty ? "armed_night_bypass" : "armed_night";
+  if (mapped == "armed_vacation")   return bypassed_non_empty ? "armed_vacation_bypass" : "armed_vacation";
+  if (mapped == "armed_custom_bypass") {
+    return bypassed_non_empty ? "armed_custom_bypass" : "armed_custom";
   }
-  if (mapped == "armed_away") {
-    if (bypassed_non_empty) return "armed_away_bypass";
-    return mapped;
-  }
+
   return mapped;
 }
 
@@ -239,11 +268,22 @@ std::string K1AlarmListener::trim_copy_(const std::string &s) {
   return s.substr(a, b - a);
 }
 
+// ---------- Initial publish ----------
+void K1AlarmListener::publish_initial_connection_timeout_() {
+  if (initial_state_published_) return;
+  publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
+  initial_state_published_ = true;
+}
+
 // ---------- Publish ----------
 void K1AlarmListener::publish_state_if_changed_(const std::string &st) {
-  if (!main_sensor_) return;
-  if (!last_api_connected_) {
-    if (st != CONNECTION_TIMEOUT_STATE) return;
+  if (!main_sensor_) {
+    // Sensor not yet attached; record desired state so it will publish when sensor registers.
+    last_published_state_ = st;
+    return;
+  }
+  if (!last_api_connected_ && st != CONNECTION_TIMEOUT_STATE) {
+    return;
   }
   if (st == last_published_state_) {
     ESP_LOGV(TAG, "State unchanged (%s)", st.c_str());
