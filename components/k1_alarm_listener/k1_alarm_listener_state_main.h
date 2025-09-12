@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "state_handling.h"
+#include "k1_alarm_listener_state_handling.h"
 
 namespace esphome {
 namespace k1_alarm_listener {
@@ -9,7 +9,7 @@ class K1AlarmListener;
 class K1AlarmListenerTextSensor;
 class K1AlarmListenerBinarySensor;
 
-// Outward facing: publishes to sensors, coalesces updates, consults logic engine
+// Outward-facing publisher/coalescer
 class K1AlarmStateMain {
  public:
   void init(K1AlarmListener *parent, K1AlarmStateHandling *handling) {
@@ -19,15 +19,12 @@ class K1AlarmStateMain {
   void attach_text_sensor(K1AlarmListenerTextSensor *ts);
   void attach_connection_sensor(K1AlarmListenerBinarySensor *bs);
 
-  // Called when new events/attrs arrive -> schedule publish
   void schedule_publish();
-  void finalize_publish();  // actually compute & push
-
-  void on_loop(uint32_t now_ms);  // tick override expiry via handling
+  void finalize_publish();
+  void on_loop(uint32_t now_ms);
 
   void publish_initial_placeholder();
 
-  // For dump_config
   const std::string &last_published() const { return last_published_state_; }
 
  private:
