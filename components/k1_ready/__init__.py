@@ -1,4 +1,49 @@
 import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import api
+from esphome.const import CONF_ID
 
-# Minimal namespace bootstrap so multiple platforms (select, binary_sensor) can coexist.
 k1_ready_ns = cg.esphome_ns.namespace("k1_ready")
+
+# Engine class (holds state, options, flags, service)
+K1Ready = k1_ready_ns.class_("K1Ready", cg.Component, api.CustomAPIDevice)
+
+CONF_OPTIONS = "options"
+CONF_INITIAL_OPTION = "initial_option"
+CONF_OPTIMISTIC = "optimistic"
+CONF_RESTORE_VALUE = "restore_value"
+
+MULTI_CONF = True  # allow multiple engines if ever needed
+
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(K1Ready),
+        cv.Required(CONF_OPTIONS): cv.All(cv.ensure_list(cv.string), cv.Length(min=1)),
+        cv.Optional(CONF_INITIAL_OPTION): cv.string,
+        cv.Optional(CONF_OPTIMISTIC, default=True): cv.boolean,
+        cv.Optional(CONF_RESTORE_VALUE, default=True): cv.boolean,
+    }
+).add_extra_validation(
+    lambda cfg: (
+        cv.Schema({cv.Optional(CONF_INITIAL_OPTION): cv.In(cfg[CONF_OPTIONS])})(cfg)
+        if CONF_INITIAL_OPTION in cfg
+        else cfg
+    )
+)
+
+async def to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+
+    for opt in config[CONF_OPTIONS]:
+        cg.add(var.add_option(opt))
+
+    if CONF_INITIAL_OPTION in config:
+        cg.add(var.set_initial_option(config[CONF_INITIAL_OPTION]))
+
+    cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
+    cg.add(var.set_restore_value(config[CONF_RESTORE_VALUE]))
+
+    await cg.register_component(var, config)
+
+    # Register the API service once
+    cg.add(var.register_ready_update_service())
