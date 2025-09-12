@@ -9,7 +9,8 @@ buzzer_ns = cg.esphome_ns.namespace("buzzer")
 BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
 
 script_ns = cg.esphome_ns.namespace("script")
-Script = script_ns.class_("Script", cg.Component)
+# We reference parameterized Script (pin:string, force:bool, skip:bool)
+Script3 = script_ns.class_("Script", cg.Component)
 
 CONF_BUZZER_ID = "buzzer_id"
 CONF_AWAY_SCRIPT_ID = "away_script_id"
@@ -22,9 +23,9 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(K1UartComponent),
         cv.Optional(CONF_BUZZER_ID): cv.use_id(BuzzerComponent),
-        cv.Optional(CONF_AWAY_SCRIPT_ID): cv.use_id(Script),
-        cv.Optional(CONF_HOME_SCRIPT_ID): cv.use_id(Script),
-        cv.Optional(CONF_DISARM_SCRIPT_ID): cv.use_id(Script),
+        cv.Optional(CONF_AWAY_SCRIPT_ID): cv.use_id(Script3),
+        cv.Optional(CONF_HOME_SCRIPT_ID): cv.use_id(Script3),
+        cv.Optional(CONF_DISARM_SCRIPT_ID): cv.use_id(Script3),
         cv.Optional(CONF_FORCE_PREFIX, default="999"): cv.string,
         cv.Optional(CONF_SKIP_DELAY_PREFIX, default="998"): cv.string,
     }
