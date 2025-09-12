@@ -10,17 +10,16 @@ static const char *const TAG = "test_states";
 void TestStatesComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Test States Component:");
   ESP_LOGCONFIG(TAG, "  Current Mode: %s", this->mode_string().c_str());
-  ESP_LOGCONFIG(TAG, "  Triggers attached:");
-  ESP_LOGCONFIG(TAG, "    mode1: %s", mode1_trigger_ ? "YES" : "NO");
-  ESP_LOGCONFIG(TAG, "    mode2: %s", mode2_trigger_ ? "YES" : "NO");
-  ESP_LOGCONFIG(TAG, "    mode3: %s", mode3_trigger_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  mode1 triggers: %u", (unsigned)mode1_triggers_.size());
+  ESP_LOGCONFIG(TAG, "  mode2 triggers: %u", (unsigned)mode2_triggers_.size());
+  ESP_LOGCONFIG(TAG, "  mode3 triggers: %u", (unsigned)mode3_triggers_.size());
 }
 
 void TestStatesComponent::set_mode(Mode m) {
   if (m == this->mode_) return;
   this->mode_ = m;
   ESP_LOGI(TAG, "Mode changed -> %s", this->mode_string().c_str());
-  // For this first test we just log per your request
+
   switch (mode_) {
     case Mode::MODE1:
       ESP_LOGI(TAG, "I'm in mode 1");
@@ -32,12 +31,14 @@ void TestStatesComponent::set_mode(Mode m) {
       ESP_LOGI(TAG, "I'm in mode 3");
       break;
   }
-  fire_current_mode_trigger_();
+
+  fire_triggers_for_mode_(mode_);
 }
 
 void TestStatesComponent::set_mode_by_name(const std::string &name_in) {
   std::string s = name_in;
-  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return (char) std::tolower(c); });
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c){ return (char)std::tolower(c); });
   if (s == "mode1") set_mode(Mode::MODE1);
   else if (s == "mode2") set_mode(Mode::MODE2);
   else if (s == "mode3") set_mode(Mode::MODE3);
@@ -55,17 +56,16 @@ std::string TestStatesComponent::mode_string() const {
   }
 }
 
-void TestStatesComponent::fire_current_mode_trigger_() {
-  switch (mode_) {
-    case Mode::MODE1:
-      if (mode1_trigger_) mode1_trigger_->trigger();
-      break;
-    case Mode::MODE2:
-      if (mode2_trigger_) mode2_trigger_->trigger();
-      break;
-    case Mode::MODE3:
-      if (mode3_trigger_) mode3_trigger_->trigger();
-      break;
+void TestStatesComponent::fire_triggers_for_mode_(Mode m) {
+  std::vector<ModeTrigger*> *vec = nullptr;
+  switch (m) {
+    case Mode::MODE1: vec = &mode1_triggers_; break;
+    case Mode::MODE2: vec = &mode2_triggers_; break;
+    case Mode::MODE3: vec = &mode3_triggers_; break;
+  }
+  if (!vec) return;
+  for (auto *t : *vec) {
+    if (t != nullptr) t->trigger();
   }
 }
 
