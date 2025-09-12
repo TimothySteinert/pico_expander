@@ -6,104 +6,102 @@ namespace k1_ready {
 
 static const char *const TAG = "k1_ready";
 
-// ---------- Setup ----------
-void K1ReadySelect::setup() {
-  // Restore previous selected option if requested and valid
+// ---------- K1Ready (engine) ----------
+void K1Ready::setup() {
   if (restore_value_) {
     pref_ = global_preferences->make_preference<std::string>(this->get_object_id_hash());
+    preference_inited_ = true;
+  }
+  load_or_init_selection_();
+  push_select_state_();
+  push_ready_state_();
+}
+
+void K1Ready::dump_config() {
+  ESP_LOGCONFIG(TAG, "K1 Ready Engine:");
+  ESP_LOGCONFIG(TAG, "  Options (%u):", (unsigned) options_.size());
+  for (auto &o : options_) ESP_LOGCONFIG(TAG, "    - %s", o.c_str());
+  ESP_LOGCONFIG(TAG, "  Current Mode: %s", current_mode_.c_str());
+  ESP_LOGCONFIG(TAG, "  Optimistic: %s", optimistic_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Restore Value: %s", restore_value_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Flags: away=%d home=%d night=%d custom=%d vacation=%d",
+                (int) ready_away_, (int) ready_home_, (int) ready_night_,
+                (int) ready_custom_, (int) ready_vacation_);
+}
+
+void K1Ready::register_ready_update_service() {
+  this->register_service(&K1Ready::api_ready_update_, "ready_update",
+                         {"armed_away",
+                          "armed_home",
+                          "armed_night",
+                          "armed_custom_bypass",
+                          "armed_vacation"});
+}
+
+void K1Ready::load_or_init_selection_() {
+  if (restore_value_ && preference_inited_) {
     std::string stored;
     if (pref_.load(&stored)) {
       for (auto &o : options_) {
         if (o == stored) {
-          restored_value_ = stored;
-            has_restored_ = true;
-            break;
+          current_mode_ = stored;
+          return;
         }
       }
     }
   }
-  publish_initial_state_();
-  publish_ready_state_();
-}
-
-// Called by codegen after constructing the object to attach the service.
-void K1ReadySelect::register_ready_update_service() {
-  this->register_service(&K1ReadySelect::api_ready_update_, "ready_update",
-                         {"armed_away", "armed_home", "armed_night",
-                          "armed_custom_bypass", "armed_vacation"});
-}
-
-// ---------- Dump Config ----------
-void K1ReadySelect::dump_config() {
-  ESP_LOGCONFIG(TAG, "K1 Ready Select:");
-  ESP_LOGCONFIG(TAG, "  Optimistic: %s", optimistic_ ? "YES" : "NO");
-  ESP_LOGCONFIG(TAG, "  Restore Value: %s", restore_value_ ? "YES" : "NO");
-  if (!initial_option_.empty())
-    ESP_LOGCONFIG(TAG, "  Initial Option: %s", initial_option_.c_str());
-  ESP_LOGCONFIG(TAG, "  Options (%u):", (unsigned) options_.size());
-  for (auto &o : options_)
-    ESP_LOGCONFIG(TAG, "    - %s", o.c_str());
-  ESP_LOGCONFIG(TAG, "  Current Selection: %s", this->state.c_str());
-  ESP_LOGCONFIG(TAG, "  Readiness Flags:");
-  ESP_LOGCONFIG(TAG, "    armed_away: %s", ready_away_ ? "READY" : "NOT READY");
-  ESP_LOGCONFIG(TAG, "    armed_home: %s", ready_home_ ? "READY" : "NOT READY");
-  ESP_LOGCONFIG(TAG, "    armed_night: %s", ready_night_ ? "READY" : "NOT READY");
-  ESP_LOGCONFIG(TAG, "    armed_custom_bypass: %s", ready_custom_ ? "READY" : "NOT READY");
-  ESP_LOGCONFIG(TAG, "    armed_vacation: %s", ready_vacation_ ? "READY" : "NOT READY");
-}
-
-// ---------- Select Traits ----------
-select::SelectTraits K1ReadySelect::get_traits() {
-  select::SelectTraits traits;
-  traits.set_options(options_);
-  return traits;
-}
-
-// ---------- Initial State ----------
-void K1ReadySelect::publish_initial_state_() {
-  std::string chosen;
-  if (has_restored_) {
-    chosen = restored_value_;
-  } else if (!initial_option_.empty()) {
-    chosen = initial_option_;
+  if (!initial_option_.empty()) {
+    current_mode_ = initial_option_;
   } else if (!options_.empty()) {
-    chosen = options_.front();
+    current_mode_ = options_.front();
   }
-  if (!chosen.empty())
-    this->publish_state(chosen);
 }
 
-// ---------- Control (user selection) ----------
-void K1ReadySelect::control(const std::string &value) {
+void K1Ready::save_selection_() {
+  if (!restore_value_ || !preference_inited_ || current_mode_.empty()) return;
+  pref_.save(&current_mode_);
+}
+
+void K1Ready::user_select(const std::string &mode) {
+  // Validate
   bool valid = false;
   for (auto &o : options_) {
-    if (o == value) { valid = true; break; }
+    if (o == mode) { valid = true; break; }
   }
   if (!valid) {
-    ESP_LOGW(TAG, "Ignoring invalid selection '%s'", value.c_str());
+    ESP_LOGW(TAG, "Rejecting invalid mode '%s'", mode.c_str());
     return;
   }
-
-  this->publish_state(value);
-  if (restore_value_)
-    save_();
-  publish_ready_state_();
+  if (mode == current_mode_) return;
+  current_mode_ = mode;
+  save_selection_();
+  ESP_LOGD(TAG, "Mode changed to '%s'", current_mode_.c_str());
+  push_select_state_();
+  push_ready_state_();
 }
 
-// ---------- Preference Save ----------
-void K1ReadySelect::save_() {
-  if (!restore_value_ || !pref_.is_initialized()) return;
-  const std::string &cur = this->state;
-  if (cur.empty()) return;
-  pref_.save(&cur);
+bool K1Ready::ready_for_mode(const std::string &mode) const {
+  if (mode == "armed_away") return ready_away_;
+  if (mode == "armed_home") return ready_home_;
+  if (mode == "armed_night") return ready_night_;
+  if (mode == "armed_vacation") return ready_vacation_;
+  if (mode == "armed_custom_bypass") return ready_custom_;
+  return false;
 }
 
-// ---------- API Service Handler ----------
-void K1ReadySelect::api_ready_update_(bool armed_away,
-                                      bool armed_home,
-                                      bool armed_night,
-                                      bool armed_custom_bypass,
-                                      bool armed_vacation) {
+void K1Ready::push_select_state_() {
+  if (select_ != nullptr) select_->publish_state(current_mode_);
+}
+
+void K1Ready::push_ready_state_() {
+  if (ready_sensor_ != nullptr) ready_sensor_->update_from_engine(current_mode_ready());
+}
+
+void K1Ready::api_ready_update_(bool armed_away,
+                                bool armed_home,
+                                bool armed_night,
+                                bool armed_custom_bypass,
+                                bool armed_vacation) {
   bool changed =
       (ready_away_ != armed_away) ||
       (ready_home_ != armed_home) ||
@@ -118,32 +116,28 @@ void K1ReadySelect::api_ready_update_(bool armed_away,
   ready_vacation_ = armed_vacation;
 
   if (changed) {
-    ESP_LOGD(TAG, "Flags updated: away=%d home=%d night=%d custom=%d vacation=%d",
+    ESP_LOGD(TAG, "Readiness updated: away=%d home=%d night=%d custom=%d vacation=%d",
              (int)ready_away_, (int)ready_home_, (int)ready_night_,
              (int)ready_custom_, (int)ready_vacation_);
-    publish_ready_state_();
+    push_ready_state_();
   }
 }
 
-// ---------- Mode Readiness ----------
-bool K1ReadySelect::ready_for_mode_(const std::string &mode) const {
-  if (mode == "armed_away") return ready_away_;
-  if (mode == "armed_home") return ready_home_;
-  if (mode == "armed_night") return ready_night_;
-  if (mode == "armed_vacation") return ready_vacation_;
-  if (mode == "armed_custom_bypass") return ready_custom_;
-  return false;
+// ---------- Facade Select ----------
+select::SelectTraits K1ReadySelect::get_traits() {
+  select::SelectTraits traits;
+  if (engine_ != nullptr)
+    traits.set_options(engine_->options());
+  return traits;
 }
 
-bool K1ReadySelect::current_mode_ready() const {
-  return ready_for_mode_(this->state);
+void K1ReadySelect::control(const std::string &value) {
+  if (engine_ != nullptr)
+    engine_->user_select(value);
 }
 
-// ---------- Publish to Binary Sensor ----------
-void K1ReadySelect::publish_ready_state_() {
-  if (ready_binary_sensor_ == nullptr) return;
-  ready_binary_sensor_->update_from_parent(current_mode_ready());
-}
+// ---------- Binary Sensor ----------
+/* (K1ReadyBinarySensor has no custom logic; engine invokes update_from_engine) */
 
 }  // namespace k1_ready
 }  // namespace esphome
