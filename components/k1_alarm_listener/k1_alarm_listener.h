@@ -28,7 +28,7 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
  public:
   void set_alarm_entity(const std::string &e) { alarm_entity_ = e; }
   void set_alarm_type(uint8_t t) { alarm_type_ = static_cast<AlarmIntegrationType>(t); }
-  void set_text_sensor(K1AlarmListenerTextSensor *ts) { main_sensor_ = ts; }
+  void set_text_sensor(K1AlarmListenerTextSensor *ts);
   void register_ha_connection_sensor(binary_sensor::BinarySensor *bs) { ha_connection_sensor_ = bs; }
 
   void setup() override;
@@ -49,7 +49,7 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   bool subscription_started_{false};
   bool last_api_connected_{true};
 
-  // Base mapped state (after mapping unknown/unavailable)
+  // Base mapped state (after unknown/unavailable mapping)
   std::string current_base_state_;
   std::string last_published_state_;
 
@@ -63,11 +63,9 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
     bool bypassed_seen{false};
   } attr_;
 
-  // Whether we've ever confirmed attributes exist (for inference)
   bool attributes_supported_{false};
-
-  // Waiting flag: true if we are holding publication until required attributes are present.
   bool waiting_for_attributes_{false};
+  bool initial_state_published_{false};  // ensures we publish connection_timeout exactly once at boot
 
   // Constants
   static constexpr const char *CONNECTION_TIMEOUT_STATE = "connection_timeout";
@@ -88,7 +86,7 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   bool state_requires_attributes_(const std::string &mapped) const;
   bool have_required_attributes_for_state_(const std::string &mapped) const;
   std::string compute_inferred_state_(const std::string &mapped) const;
-  void attempt_publish_alarmo_();  // tries to publish if requirements satisfied
+  void attempt_publish_alarmo_();  // publish when requirements satisfied
   bool is_truthy_attr_list_(const std::string &v) const;
 
   // Helpers
@@ -98,6 +96,7 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
 
   // Publishing
   void publish_state_if_changed_(const std::string &st);
+  void publish_initial_connection_timeout_();
 };
 
 class K1AlarmListenerTextSensor : public text_sensor::TextSensor, public Component {
