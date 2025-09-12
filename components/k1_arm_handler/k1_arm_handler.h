@@ -9,29 +9,33 @@
 namespace esphome {
 namespace k1_arm_handler {
 
+// Concrete script type matching YAML parameters:
+// (mode, pin, force, skip, prefix) all strings.
+using CallbackScript = script::Script<
+    std::string, std::string, std::string, std::string, std::string>;
+
 class K1ArmHandlerComponent : public Component {
  public:
   void set_alarm_entity_id(const std::string &v) { alarm_entity_id_ = v; }
   void set_force_prefix(const std::string &v) { force_prefix_ = v; }
   void set_skip_delay_prefix(const std::string &v) { skip_delay_prefix_ = v; }
-  void set_callback_script(script::Script *s) { callback_script_ = s; }
+  void set_callback_script(CallbackScript *s) { callback_script_ = s; }
 
   void setup() override {}
   void loop() override {}
 
-  // Public APIs
+  // Public entry points
   void handle_a0_message(const std::vector<uint8_t> &bytes);
   void execute_command(const std::string &prefix,
                        const std::string &arm_select,
                        const std::string &pin);
 
  protected:
-  // Config
   std::string alarm_entity_id_;
   std::string force_prefix_{"999"};
   std::string skip_delay_prefix_{"998"};
 
-  script::Script *callback_script_{nullptr};  // unified script
+  CallbackScript *callback_script_{nullptr};
 
   // Helpers
   std::string map_digit_(uint8_t code) const;
