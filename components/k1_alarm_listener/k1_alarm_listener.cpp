@@ -1,10 +1,16 @@
 #include "k1_alarm_listener.h"
 #include "esphome/core/log.h"
+#include "esp_timer.h"  // for esp_timer_get_time()
 
 namespace esphome {
 namespace k1_alarm_listener {
 
 static const char *const TAG = "k1_alarm_listener";
+
+// IDF-compatible millisecond time helper
+static inline uint32_t now_ms() {
+  return (uint32_t)(esp_timer_get_time() / 1000ULL);
+}
 
 // ---------- Text sensor registration ----------
 void K1AlarmListener::set_text_sensor(K1AlarmListenerTextSensor *ts) {
@@ -24,21 +30,17 @@ void K1AlarmListener::setup() {
   }
   publish_initial_connection_timeout_();
 
-  // Subscribe base state
   this->subscribe_homeassistant_state(&K1AlarmListener::ha_state_callback_, this->alarm_entity_);
   subscription_started_ = true;
   ESP_LOGI(TAG, "Subscribed to '%s' (type=%s)", alarm_entity_.c_str(),
            alarm_type_ == AlarmIntegrationType::ALARMO ? "alarmo" : "other");
 
-  // Attributes if alarmo
   if (alarm_type_ == AlarmIntegrationType::ALARMO) {
     this->subscribe_homeassistant_state(&K1AlarmListener::arm_mode_attr_callback_, this->alarm_entity_, "arm_mode");
     this->subscribe_homeassistant_state(&K1AlarmListener::next_state_attr_callback_, this->alarm_entity_, "next_state");
     this->subscribe_homeassistant_state(&K1AlarmListener::bypassed_attr_callback_, this->alarm_entity_, "bypassed_sensors");
   }
 
-  // Register service for final overrides
-  // Service name: failed_arm (string reason)
   this->register_service(&K1AlarmListener::on_failed_arm_service_, "failed_arm", {"reason"});
 
   last_api_connected_ = api_connected_now_();
@@ -47,6 +49,7 @@ void K1AlarmListener::setup() {
     ESP_LOGD(TAG, "API not connected yet; holding connection_timeout");
 }
 
+// ---------- Loop ----------
 void K1AlarmListener::loop() {
   bool connected = api_connected_now_();
   if (connected != last_api_connected_) {
@@ -54,16 +57,15 @@ void K1AlarmListener::loop() {
     last_api_connected_ = connected;
     update_connection_sensor_(connected);
     if (!connected) {
-      // connection timeout overrides any current override
       clear_override_();
       publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
       waiting_for_transitional_attrs_ = false;
     } else {
       publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
       waiting_for_transitional_attrs_ = false;
-      // underlying states will republish when they arrive
     }
   }
+  check_override_expiry_();
 }
 
 // ---------- Service: failed_arm ----------
@@ -71,7 +73,7 @@ void K1AlarmListener::on_failed_arm_service_(std::string reason) {
   std::string r = lower_copy_(trim_copy_(reason));
 
   if (!can_apply_override_()) {
-    ESP_LOGD(TAG, "Ignoring failed_arm '%s' because base state is connection_timeout", r.c_str());
+    ESP_LOGD(TAG, "Ignoring failed_arm '%s' (cannot apply in current state)", r.c_str());
     return;
   }
 
@@ -84,44 +86,41 @@ void K1AlarmListener::on_failed_arm_service_(std::string reason) {
   }
 }
 
-// ---------- Override handling ----------
+// ---------- Override helpers ----------
 bool K1AlarmListener::can_apply_override_() const {
-  // Do not override if current displayed state is connection_timeout OR
-  // base indicates connection timeout (still awaiting HA)
   if (!last_api_connected_) return false;
   if (current_base_state_.empty()) return false;
   if (current_base_state_ == CONNECTION_TIMEOUT_STATE) return false;
-  if (last_published_state_ == CONNECTION_TIMEOUT_STATE) {
-    // Still in placeholder state
-    return false;
-  }
+  if (last_published_state_ == CONNECTION_TIMEOUT_STATE) return false;
   return true;
 }
 
 void K1AlarmListener::start_override_(const std::string &state, uint32_t duration_ms) {
-  // Cancel existing override timer if any
-  if (override_cancel_) override_cancel_.cancel();
   override_active_ = true;
   override_state_ = state;
-  ESP_LOGD(TAG, "Starting override state '%s' for %u ms", state.c_str(), (unsigned) duration_ms);
+  override_end_ms_ = now_ms() + duration_ms;
+  ESP_LOGD(TAG, "Starting override '%s' for %u ms", state.c_str(), (unsigned) duration_ms);
   publish_state_if_changed_(override_state_);
-
-  override_cancel_ = this->set_timeout(duration_ms, [this]() {
-    ESP_LOGD(TAG, "Override '%s' expired", override_state_.c_str());
-    this->clear_override_();
-    // After clearing, recompute & publish underlying state (coalesced path)
-    this->schedule_publish_();
-  });
 }
 
 void K1AlarmListener::clear_override_() {
   if (!override_active_) return;
-  if (override_cancel_) override_cancel_.cancel();
+  ESP_LOGD(TAG, "Clearing override '%s'", override_state_.c_str());
   override_active_ = false;
   override_state_.clear();
+  override_end_ms_ = 0;
 }
 
-// ---------- Connection Helpers ----------
+void K1AlarmListener::check_override_expiry_() {
+  if (!override_active_) return;
+  if (now_ms() >= override_end_ms_) {
+    ESP_LOGD(TAG, "Override '%s' expired", override_state_.c_str());
+    clear_override_();
+    schedule_publish_();  // recompute underlying state
+  }
+}
+
+// ---------- Connection helpers ----------
 bool K1AlarmListener::api_connected_now_() const {
 #ifdef USE_API
   if (api::global_api_server == nullptr) return false;
@@ -142,7 +141,7 @@ void K1AlarmListener::enforce_connection_state_() {
   }
 }
 
-// ---------- Attribute callbacks ----------
+// ---------- Attribute utilities ----------
 bool K1AlarmListener::attr_has_value_(const std::string &v) {
   if (v.empty()) return false;
   std::string low;
@@ -151,6 +150,7 @@ bool K1AlarmListener::attr_has_value_(const std::string &v) {
   return !(low == "null" || low == "none");
 }
 
+// ---------- Attribute callbacks ----------
 void K1AlarmListener::arm_mode_attr_callback_(std::string value) {
   if (alarm_type_ != AlarmIntegrationType::ALARMO) return;
   attr_.arm_mode = trim_copy_(value);
@@ -201,13 +201,11 @@ void K1AlarmListener::finalize_publish_() {
   if (!pending_publish_) return;
   pending_publish_ = false;
 
-  // If an override is active, we only allow connection_timeout to supersede it.
   if (override_active_) {
     if (!last_api_connected_ || current_base_state_ == CONNECTION_TIMEOUT_STATE) {
       clear_override_();
       publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
     }
-    // Otherwise do nothing (keep override).
     return;
   }
 
@@ -236,10 +234,9 @@ void K1AlarmListener::finalize_publish_() {
       waiting_for_transitional_attrs_ = true;
       if (publish_retry_count_ < MAX_PUBLISH_RETRIES) {
         publish_retry_count_++;
-        schedule_publish_();  // retry quickly
+        schedule_publish_();
         return;
       } else {
-        // Fallback: publish generic transitional state
         publish_state_if_changed_(current_base_state_);
         waiting_for_transitional_attrs_ = false;
         publish_retry_count_ = 0;
@@ -268,11 +265,13 @@ std::string K1AlarmListener::map_alarm_state_(const std::string &raw_in) const {
 bool K1AlarmListener::is_transitional_(const std::string &mapped) const {
   return (mapped == "arming" || mapped == "pending");
 }
+
 bool K1AlarmListener::have_transitional_attrs_(const std::string &mapped) const {
   if (mapped == "arming")  return attr_.arm_mode_seen;
   if (mapped == "pending") return attr_.arm_mode_seen || attr_.next_state_seen;
   return true;
 }
+
 bool K1AlarmListener::is_truthy_list_(const std::string &v) const {
   if (v.empty()) return false;
   std::string low = lower_copy_(trim_copy_(v));
@@ -331,7 +330,6 @@ void K1AlarmListener::publish_state_if_changed_(const std::string &st) {
     return;
   }
   if (!last_api_connected_ && st != CONNECTION_TIMEOUT_STATE) return;
-
   if (st == last_published_state_) {
     ESP_LOGV(TAG, "State unchanged (%s)", st.c_str());
     return;
@@ -365,8 +363,10 @@ void K1AlarmListener::dump_config() {
   ESP_LOGCONFIG(TAG, "  Subscription: %s", subscription_started_ ? "started" : "not started");
   ESP_LOGCONFIG(TAG, "  API Connected (last): %s", last_api_connected_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG, "  Override Active: %s", override_active_ ? "YES" : "NO");
-  if (override_active_)
-    ESP_LOGCONFIG(TAG, "    Override State: %s", override_state_.c_str());
+  if (override_active_) {
+    int32_t remain = (override_end_ms_ > now_ms()) ? (int32_t)(override_end_ms_ - now_ms()) : 0;
+    ESP_LOGCONFIG(TAG, "    Override State: %s (remaining %d ms)", override_state_.c_str(), remain);
+  }
   if (alarm_type_ == AlarmIntegrationType::ALARMO) {
     ESP_LOGCONFIG(TAG, "  Attr seen: arm_mode=%s next_state=%s bypassed=%s",
                   attr_.arm_mode_seen ? "Y":"N",
