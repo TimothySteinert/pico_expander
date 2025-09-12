@@ -12,11 +12,10 @@ namespace test_states {
 
 class TestStatesComponent;
 
+// Trigger for entering a mode
 class ModeTrigger : public Trigger<> {
  public:
-  explicit ModeTrigger(TestStatesComponent *parent) : parent_(parent) {}
- protected:
-  TestStatesComponent *parent_;
+  ModeTrigger() = default;
 };
 
 class TestStatesComponent : public Component {
@@ -27,6 +26,7 @@ class TestStatesComponent : public Component {
 
   void set_mode_by_name(const std::string &name);
   const std::string &current_mode_string() const { return current_mode_; }
+
   void add_mode_trigger(const std::string &mode, ModeTrigger *t);
   void set_initial_mode(const std::string &m) { current_mode_ = m; }
 
@@ -41,11 +41,12 @@ template<typename... Ts>
 class SetModeAction : public Action<Ts...> {
  public:
   explicit SetModeAction(TestStatesComponent *parent) : parent_(parent) {}
-  void set_mode(const std::string &m) { mode_ = m; }
-  void play(Ts... x) override { parent_->set_mode_by_name(mode_); }
- protected:
-  TestStatesComponent *parent_;
-  std::string mode_;
+  TEMPLATABLE_VALUE(std::string, mode)
+  void play(Ts... x) override {
+    parent_->set_mode_by_name(this->mode_.value(x...));
+  }
+ private:
+    TestStatesComponent *parent_;
 };
 
 }  // namespace test_states
