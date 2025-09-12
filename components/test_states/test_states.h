@@ -20,11 +20,9 @@ class TestStatesComponent : public Component {
   void loop() override {}
   void dump_config() override;
 
-  // API from actions / user code
   void set_mode_by_name(const std::string &name);
   const std::string &current_mode() const { return current_mode_; }
 
-  // Called from codegen
   void add_mode1_trigger(ModeTrigger *t) { mode1_trigs_.push_back(t); }
   void add_mode2_trigger(ModeTrigger *t) { mode2_trigs_.push_back(t); }
   void add_mode3_trigger(ModeTrigger *t) { mode3_trigs_.push_back(t); }
