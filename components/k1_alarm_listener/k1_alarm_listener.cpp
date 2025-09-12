@@ -12,19 +12,18 @@ void K1AlarmListener::setup() {
     return;
   }
 
-  // Subscribe to HA state updates
-  this->subscribe_homeassistant_state(
-      [this](std::string state) {
-        ESP_LOGD(TAG, "HA entity '%s' state update: %s",
-                 this->alarm_entity_.c_str(), state.c_str());
-        if (this->state_sensor_ != nullptr) {
-          this->state_sensor_->publish_state(state);
-        }
-      },
-      this->alarm_entity_);
-
+  // NOTE: Older ESPHome versions require a member function pointer (cannot use lambda here).
+  // If you also want an attribute (e.g. 'state' vs another attribute), pass third arg.
+  this->subscribe_homeassistant_state(&K1AlarmListener::ha_state_callback_, this->alarm_entity_);
   subscription_started_ = true;
   ESP_LOGI(TAG, "Subscribed to Home Assistant entity '%s'", alarm_entity_.c_str());
+}
+
+void K1AlarmListener::ha_state_callback_(std::string state) {
+  ESP_LOGD(TAG, "HA entity '%s' state update: %s", this->alarm_entity_.c_str(), state.c_str());
+  if (this->state_sensor_ != nullptr) {
+    this->state_sensor_->publish_state(state);
+  }
 }
 
 void K1AlarmListener::dump_config() {
