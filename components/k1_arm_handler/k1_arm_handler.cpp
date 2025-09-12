@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 #include "esphome/components/api/api_server.h"
 #include "esphome/components/api/api_connection.h"
+#include "esphome/components/api/api_pb2.h"  // protobuf message classes
 
 namespace esphome {
 namespace k1_arm_handler {
@@ -88,13 +89,10 @@ void K1ArmHandlerComponent::execute_command(const std::string &prefix,
   bool force_flag = (prefix == force_prefix_);
   bool skip_delay_flag = (prefix == skip_delay_prefix_);
 
-  // If you want to mask the pin in logs:
-  // std::string pin_for_log(pin.size() ? "****" : "");
-  const std::string &pin_for_log = pin;
-
+  // For PIN masking, replace pin with "****" below if desired.
   ESP_LOGI(TAG,
            "Execute - mode=%s pin='%s' force=%s skip_delay=%s (prefix='%s')",
-           arm_select.c_str(), pin_for_log.c_str(),
+           arm_select.c_str(), pin.c_str(),
            force_flag ? "true" : "false",
            skip_delay_flag ? "true" : "false",
            prefix.c_str());
@@ -120,7 +118,8 @@ void K1ArmHandlerComponent::call_disarm_(const std::string &pin) {
   ESP_LOGI(TAG, "HA service disarm: %s entity=%s",
            disarm_service_.c_str(), alarm_entity_id_.c_str());
 
-  api::HomeAssistantServiceCallRequest req;
+  // Your ESPHome build appears to use 'Homeassistant...' capitalization
+  api::HomeassistantServiceCallRequest req;
   req.service = disarm_service_;
   req.data["entity_id"] = alarm_entity_id_;
   req.data["code"] = pin;
@@ -147,12 +146,11 @@ void K1ArmHandlerComponent::call_arm_(const std::string &mode,
            force_flag ? "true" : "false",
            skip_delay_flag ? "true" : "false");
 
-  api::HomeAssistantServiceCallRequest req;
+  api::HomeassistantServiceCallRequest req;
   req.service = arm_service_;
   req.data["entity_id"]  = alarm_entity_id_;
   req.data["mode"]       = mode;
   req.data["code"]       = pin;
-  // Alarmo expects booleans; HA service API will coerce strings "true"/"false" or actual bool.
   req.data["force"]      = force_flag ? "true" : "false";
   req.data["skip_delay"] = skip_delay_flag ? "true" : "false";
 
@@ -160,4 +158,4 @@ void K1ArmHandlerComponent::call_arm_(const std::string &mode,
 }
 
 }  // namespace k1_arm_handler
-}  // namespace esphhome
+}  // namespace esphome
