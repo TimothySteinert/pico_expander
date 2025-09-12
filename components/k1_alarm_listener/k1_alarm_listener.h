@@ -23,8 +23,10 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   K1AlarmListenerTextSensor *state_sensor_{nullptr};
   bool subscription_started_{false};
 
-  // Callback used by subscribe_homeassistant_state (older ESPHome expects member fn ptr)
   void ha_state_callback_(std::string state);
+
+  // (Optional future use) validation helper
+  bool is_known_alarm_state_(const std::string &s) const;
 };
 
 class K1AlarmListenerTextSensor : public text_sensor::TextSensor, public Component {
