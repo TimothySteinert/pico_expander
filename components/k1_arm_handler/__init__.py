@@ -5,8 +5,20 @@ from esphome.components import script
 k1_arm_handler_ns = cg.esphome_ns.namespace("k1_arm_handler")
 K1ArmHandlerComponent = k1_arm_handler_ns.class_("K1ArmHandlerComponent", cg.Component)
 
+# Define the concrete Script type: 5 string parameters
+CallbackScript = cg.esphome_ns.namespace("script").class_(
+    "Script",
+    cg.TemplateArguments(
+        cg.std_string,
+        cg.std_string,
+        cg.std_string,
+        cg.std_string,
+        cg.std_string
+    )
+)
+
 CONF_ID = "id"
-CONF_ALARM_ENTITY_ID = "alarm_entity_id"     # kept for reference/logging (not used internally now)
+CONF_ALARM_ENTITY_ID = "alarm_entity_id"
 CONF_FORCE_PREFIX = "force_prefix"
 CONF_SKIP_DELAY_PREFIX = "skip_delay_prefix"
 CONF_CALLBACK_SCRIPT = "callback_script"
@@ -30,4 +42,5 @@ async def to_code(config):
     cg.add(var.set_skip_delay_prefix(config[CONF_SKIP_DELAY_PREFIX]))
 
     scr = await cg.get_variable(config[CONF_CALLBACK_SCRIPT])
+    # scr is already a Script<std::string,...> instance generated from YAML parameters
     cg.add(var.set_callback_script(scr))
