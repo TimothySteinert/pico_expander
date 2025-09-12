@@ -1,4 +1,4 @@
-#include "api.h"
+#include "k1_alarm_listener_api.h"
 #include "k1_alarm_listener.h"
 
 namespace esphome {
