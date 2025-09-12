@@ -4,7 +4,6 @@
 #include "esphome/components/api/custom_api_device.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
-#include "esphome/core/helpers.h"
 
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
@@ -77,10 +76,10 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   uint8_t publish_retry_count_{0};
   static constexpr uint8_t MAX_PUBLISH_RETRIES = 3;
 
-  // Override (final override) state
+  // Override state
   bool override_active_{false};
   std::string override_state_;
-  CancelableCallback override_cancel_{};
+  uint32_t override_end_ms_{0};  // timestamp (ms) when override ends
 
   // Constants
   static constexpr const char *CONNECTION_TIMEOUT_STATE = "connection_timeout";
@@ -114,6 +113,7 @@ class K1AlarmListener : public Component, public api::CustomAPIDevice {
   void start_override_(const std::string &state, uint32_t duration_ms);
   void clear_override_();
   bool can_apply_override_() const;
+  void check_override_expiry_();
 
   // Publishing / utils
   void publish_state_if_changed_(const std::string &st);
