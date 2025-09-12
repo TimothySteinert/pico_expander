@@ -1,4 +1,4 @@
-#include "k1_ready_select.h"
+#include "k1_ready.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -6,7 +6,9 @@ namespace k1_ready {
 
 static const char *const TAG = "k1_ready";
 
+// ---------- Setup ----------
 void K1ReadySelect::setup() {
+  // Restore previous selected option if requested and valid
   if (restore_value_) {
     pref_ = global_preferences->make_preference<std::string>(this->get_object_id_hash());
     std::string stored;
@@ -14,23 +16,24 @@ void K1ReadySelect::setup() {
       for (auto &o : options_) {
         if (o == stored) {
           restored_value_ = stored;
-          has_restored_ = true;
-          break;
+            has_restored_ = true;
+            break;
         }
       }
     }
   }
   publish_initial_state_();
-  // Register service (if not already via codegen - but we separate registration to explicit call)
-  // (No-op here; codegen will call register_ready_update_service())
   publish_ready_state_();
 }
 
+// Called by codegen after constructing the object to attach the service.
 void K1ReadySelect::register_ready_update_service() {
   this->register_service(&K1ReadySelect::api_ready_update_, "ready_update",
-                         {"armed_away", "armed_home", "armed_night", "armed_custom_bypass", "armed_vacation"});
+                         {"armed_away", "armed_home", "armed_night",
+                          "armed_custom_bypass", "armed_vacation"});
 }
 
+// ---------- Dump Config ----------
 void K1ReadySelect::dump_config() {
   ESP_LOGCONFIG(TAG, "K1 Ready Select:");
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", optimistic_ ? "YES" : "NO");
@@ -49,12 +52,14 @@ void K1ReadySelect::dump_config() {
   ESP_LOGCONFIG(TAG, "    armed_vacation: %s", ready_vacation_ ? "READY" : "NOT READY");
 }
 
+// ---------- Select Traits ----------
 select::SelectTraits K1ReadySelect::get_traits() {
   select::SelectTraits traits;
   traits.set_options(options_);
   return traits;
 }
 
+// ---------- Initial State ----------
 void K1ReadySelect::publish_initial_state_() {
   std::string chosen;
   if (has_restored_) {
@@ -64,13 +69,12 @@ void K1ReadySelect::publish_initial_state_() {
   } else if (!options_.empty()) {
     chosen = options_.front();
   }
-  if (!chosen.empty()) {
+  if (!chosen.empty())
     this->publish_state(chosen);
-  }
 }
 
+// ---------- Control (user selection) ----------
 void K1ReadySelect::control(const std::string &value) {
-  // Validate option
   bool valid = false;
   for (auto &o : options_) {
     if (o == value) { valid = true; break; }
@@ -80,15 +84,13 @@ void K1ReadySelect::control(const std::string &value) {
     return;
   }
 
-  // Optimistic immediate publish (there is no external confirmation channel here)
   this->publish_state(value);
-
   if (restore_value_)
     save_();
-
   publish_ready_state_();
 }
 
+// ---------- Preference Save ----------
 void K1ReadySelect::save_() {
   if (!restore_value_ || !pref_.is_initialized()) return;
   const std::string &cur = this->state;
@@ -96,6 +98,7 @@ void K1ReadySelect::save_() {
   pref_.save(&cur);
 }
 
+// ---------- API Service Handler ----------
 void K1ReadySelect::api_ready_update_(bool armed_away,
                                       bool armed_home,
                                       bool armed_night,
@@ -115,12 +118,14 @@ void K1ReadySelect::api_ready_update_(bool armed_away,
   ready_vacation_ = armed_vacation;
 
   if (changed) {
-    ESP_LOGD(TAG, "Readiness flags updated: away=%d home=%d night=%d custom=%d vacation=%d",
-             (int)ready_away_, (int)ready_home_, (int)ready_night_, (int)ready_custom_, (int)ready_vacation_);
+    ESP_LOGD(TAG, "Flags updated: away=%d home=%d night=%d custom=%d vacation=%d",
+             (int)ready_away_, (int)ready_home_, (int)ready_night_,
+             (int)ready_custom_, (int)ready_vacation_);
     publish_ready_state_();
   }
 }
 
+// ---------- Mode Readiness ----------
 bool K1ReadySelect::ready_for_mode_(const std::string &mode) const {
   if (mode == "armed_away") return ready_away_;
   if (mode == "armed_home") return ready_home_;
@@ -134,10 +139,10 @@ bool K1ReadySelect::current_mode_ready() const {
   return ready_for_mode_(this->state);
 }
 
+// ---------- Publish to Binary Sensor ----------
 void K1ReadySelect::publish_ready_state_() {
   if (ready_binary_sensor_ == nullptr) return;
-  bool ready = current_mode_ready();
-  ready_binary_sensor_->update_from_parent(ready);
+  ready_binary_sensor_->update_from_parent(current_mode_ready());
 }
 
 }  // namespace k1_ready
