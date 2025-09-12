@@ -1,134 +1,79 @@
-import esphome.codegen as cg
-import esphome.config_validation as cv
-from esphome import automation
-from esphome.const import CONF_ID
+#include "test_states.h"
+#include "esphome/core/log.h"
 
-test_states_ns = cg.esphome_ns.namespace("test_states")
+namespace esphome {
+namespace test_states {
 
-TestStatesComponent = test_states_ns.class_("TestStatesComponent", cg.Component)
-ModeTrigger = test_states_ns.class_("ModeTrigger", automation.Trigger)
-PreModeTrigger = test_states_ns.class_("PreModeTrigger", automation.Trigger)
-SetModeAction = test_states_ns.class_("SetModeAction", automation.Action)
+static const char *const TAG = "test_states";
 
-CONF_INITIAL_MODE = "initial_mode"
-CONF_MODE = "mode"
-CONF_INTERMODE = "intermode"
+void TestStatesComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "Test States Component:");
+  ESP_LOGCONFIG(TAG, "  Current Mode: %s", current_mode_.c_str());
+  ESP_LOGCONFIG(TAG, "  Intermode triggers: %u", (unsigned) intermode_trigs_.size());
+  // (Optional) You could log counts per mode here if desired.
+}
 
-# Full fixed mode list
-MODE_KEYS = [
-    "disarmed",
-    "triggered",
-    "connection_timeout",
-    "incorrect_pin",
-    "failed_open_sensors",
+void TestStatesComponent::fire_intermode_() {
+  for (auto *t : intermode_trigs_) if (t) t->trigger();
+}
 
-    "arming",
-    "arming_home",
-    "arming_away",
-    "arming_night",
-    "arming_vacation",
-    "arming_custom_bypass",
+void TestStatesComponent::set_mode_by_name(const std::string &name_in) {
+  if (name_in.empty()) return;
+  std::string s = name_in;
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c){ return (char) std::tolower(c); });
+  if (s == current_mode_) return;
 
-    "pending",
-    "pending_home",
-    "pending_away",
-    "pending_night",
-    "pending_vacation",
-    "pending_custom_bypass",
+  fire_intermode_();  // run pre-transition actions first
 
-    "armed_home",
-    "armed_away",
-    "armed_night",
-    "armed_vacation",
+  std::string old = current_mode_;
+  current_mode_ = s;
+  ESP_LOGI(TAG, "Mode changed: '%s' -> '%s'", old.c_str(), current_mode_.c_str());
+  fire_for_mode_(current_mode_);
+}
 
-    "armed_home_bypass",
-    "armed_away_bypass",
-    "armed_night_bypass",
-    "armed_vacation_bypass",
-    "armed_custom_bypass",
-]
+void TestStatesComponent::fire_for_mode_(const std::string &mode) {
+  const std::vector<ModeTrigger*> *vec = nullptr;
 
-MULTI_CONF = True
+  if (0) {}
+  else if (mode == "disarmed") vec = &disarmed_;
+  else if (mode == "triggered") vec = &triggered_;
+  else if (mode == "connection_timeout") vec = &connection_timeout_;
+  else if (mode == "incorrect_pin") vec = &incorrect_pin_;
+  else if (mode == "failed_open_sensors") vec = &failed_open_sensors_;
 
-MODE_AUTOMATION = automation.validate_automation({
-    cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(ModeTrigger),
-})
-INTERMODE_AUTOMATION = automation.validate_automation({
-    cv.GenerateID(automation.CONF_TRIGGER_ID): cv.declare_id(PreModeTrigger),
-})
+  else if (mode == "arming") vec = &arming_;
+  else if (mode == "arming_home") vec = &arming_home_;
+  else if (mode == "arming_away") vec = &arming_away_;
+  else if (mode == "arming_night") vec = &arming_night_;
+  else if (mode == "arming_vacation") vec = &arming_vacation_;
+  else if (mode == "arming_custom_bypass") vec = &arming_custom_bypass_;
 
-def _automation_blocks(validator):
-    def inner(value):
-        flat = []
-        if isinstance(value, list):
-            for item in value:
-                flat.extend(validator(item))
-        else:
-            flat.extend(validator(value))
-        return flat
-    return inner
+  else if (mode == "pending") vec = &pending_;
+  else if (mode == "pending_home") vec = &pending_home_;
+  else if (mode == "pending_away") vec = &pending_away_;
+  else if (mode == "pending_night") vec = &pending_night_;
+  else if (mode == "pending_vacation") vec = &pending_vacation_;
+  else if (mode == "pending_custom_bypass") vec = &pending_custom_bypass_;
 
-mode_blocks_validator = _automation_blocks(MODE_AUTOMATION)
-intermode_blocks_validator = _automation_blocks(INTERMODE_AUTOMATION)
+  else if (mode == "armed_home") vec = &armed_home_;
+  else if (mode == "armed_away") vec = &armed_away_;
+  else if (mode == "armed_night") vec = &armed_night_;
+  else if (mode == "armed_vacation") vec = &armed_vacation_;
 
-SCHEMA_MODES = {cv.Optional(mk): mode_blocks_validator for mk in MODE_KEYS}
+  else if (mode == "armed_home_bypass") vec = &armed_home_bypass_;
+  else if (mode == "armed_away_bypass") vec = &armed_away_bypass_;
+  else if (mode == "armed_night_bypass") vec = &armed_night_bypass_;
+  else if (mode == "armed_vacation_bypass") vec = &armed_vacation_bypass_;
+  else if (mode == "armed_custom_bypass") vec = &armed_custom_bypass_;
 
-COMPONENT_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(): cv.declare_id(TestStatesComponent),
-        cv.Optional(CONF_INITIAL_MODE): cv.one_of(*MODE_KEYS, lower=True),
-        cv.Optional(CONF_INTERMODE): intermode_blocks_validator,
-        **SCHEMA_MODES,
-    }
-).extend(cv.COMPONENT_SCHEMA)
+  if (!vec) {
+    ESP_LOGW(TAG, "No triggers vector for mode '%s'", mode.c_str());
+    return;
+  }
+  for (auto *t : *vec)
+    if (t) t->trigger();
+}
 
-CONFIG_SCHEMA = cv.All(cv.ensure_list(COMPONENT_SCHEMA))
-
-@automation.register_action(
-    "test_states.set_mode",
-    SetModeAction,
-    cv.Schema(
-        {
-            cv.Required(CONF_ID): cv.use_id(TestStatesComponent),
-            cv.Required(CONF_MODE): cv.templatable(cv.one_of(*MODE_KEYS, lower=True)),
-        }
-    ),
-)
-async def test_states_set_mode_to_code(config, action_id, template_arg, args):
-    parent = await cg.get_variable(config[CONF_ID])
-    action = cg.new_Pvariable(action_id, template_arg, parent)
-    mode_expr = await cg.templatable(config[CONF_MODE], args, cg.std_string)
-    cg.add(action.set_mode(mode_expr))
-    return action
-
-
-async def to_code(config):
-    for comp_conf in config:
-        var = cg.new_Pvariable(comp_conf[CONF_ID])
-        await cg.register_component(var, comp_conf)
-
-        # Intermode triggers (run before every real transition)
-        inter_trigs = comp_conf.get(CONF_INTERMODE, [])
-        for trig_conf in inter_trigs:
-            ptr = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
-            cg.add(var.add_inter_mode_trigger(ptr))
-            await automation.build_automation(ptr, [], trig_conf)
-
-        first_defined = None
-        for mk in MODE_KEYS:
-            triggers = comp_conf.get(mk, [])
-            if triggers and first_defined is None:
-                first_defined = mk
-            for trig_conf in triggers:
-                trig = cg.new_Pvariable(trig_conf[automation.CONF_TRIGGER_ID])
-                # add_<mode>_trigger
-                cg.add(getattr(var, f"add_{mk}_trigger")(trig))
-                await automation.build_automation(trig, [], trig_conf)
-
-        initial_mode = comp_conf.get(CONF_INITIAL_MODE)
-        if initial_mode is not None:
-            cg.add(var.set_initial_mode(initial_mode))
-        elif first_defined is not None:
-            cg.add(var.set_initial_mode(first_defined))
-        else:
-            cg.add(var.set_initial_mode("disarmed"))
+}  // namespace test_states
+}  // namespace esphome
