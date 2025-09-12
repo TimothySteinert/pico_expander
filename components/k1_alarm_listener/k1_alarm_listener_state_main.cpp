@@ -1,4 +1,4 @@
-#include "state_main.h"
+#include "k1_alarm_listener_state_main.h"
 #include "k1_alarm_listener.h"
 #include "esphome/core/log.h"
 #include "esp_timer.h"
@@ -33,6 +33,7 @@ void K1AlarmStateMain::finalize_publish() {
   if (!pending_publish_) return;
   pending_publish_ = false;
   if (!handling_) return;
+
   std::string effective = handling_->current_effective_state(now_ms());
   handling_->clear_publish_flag();
   publish_state_if_changed_(effective);
