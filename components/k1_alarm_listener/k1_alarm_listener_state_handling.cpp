@@ -1,5 +1,6 @@
-#include "state_handling.h"
+#include "k1_alarm_listener_state_handling.h"
 #include <algorithm>
+#include <cctype>
 
 namespace esphome {
 namespace k1_alarm_listener {
@@ -98,7 +99,7 @@ std::string K1AlarmStateHandling::current_effective_state(uint32_t /*now_ms*/) {
   return underlying;
 }
 
-// ----- Internal helpers -----
+// Helpers
 std::string K1AlarmStateHandling::map_raw_state_(const std::string &raw) const {
   std::string r = lower_copy(trim_copy(raw));
   if (r == "unavailable" || r == "unknown")
