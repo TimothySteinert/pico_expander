@@ -10,7 +10,8 @@
 #include <cstdint>
 
 namespace esphome {
-namespace buzzer { class BuzzerComponent; }  // forward declaration only
+namespace buzzer { class BuzzerComponent; }
+namespace k1_arm_handler { class K1ArmHandlerComponent; }  // forward declaration
 
 namespace k1_uart {
 
@@ -23,6 +24,7 @@ class K1UartComponent : public Component {
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
   void set_buzzer(esphome::buzzer::BuzzerComponent *b) { buzzer_ = b; }
+  void set_arm_handler(esphome::k1_arm_handler::K1ArmHandlerComponent *h) { arm_handler_ = h; }
 
  protected:
 #ifdef USE_ESP32
@@ -61,6 +63,7 @@ class K1UartComponent : public Component {
 #endif
 
   esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
+  esphome::k1_arm_handler::K1ArmHandlerComponent *arm_handler_{nullptr};
 };
 
 }  // namespace k1_uart
