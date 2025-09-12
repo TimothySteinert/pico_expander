@@ -3,6 +3,7 @@ import esphome.config_validation as cv
 from esphome import automation
 from esphome.const import CONF_ID
 
+# Namespace & classes
 test_states_ns = cg.esphome_ns.namespace("test_states")
 
 TestStatesComponent = test_states_ns.class_("TestStatesComponent", cg.Component)
@@ -14,58 +15,54 @@ CONF_MODE = "mode"
 
 MULTI_CONF = True
 
-# Accept:
-# modes:
-#   mode1:
-#     - logger.log: "short form action list"
-#   mode2:
-#     - then:
-#         - logger.log: "full automation"
-#   mode3:
-#     - then:
-#         - logger.log: "first block"
-#     - then:
-#         - logger.log: "second block"
+# Validator for modes:
+# Supports:
+#   modes:
+#     mode1:
+#       - logger.log: "short form list of actions"
+#     mode2:
+#       - then:
+#           - logger.log: "full automation block"
+#       - then:
+#           - logger.log: "second automation block"
+#     mode3:
+#       - logger.log: "single action short form"
 #
-# Internally we normalize every mode's value to a list of automation dicts
-# each containing a 'then:' list.
+# Internally normalized to a list of automation dicts (each with then:)
+MODE_AUTOMATION = automation.validate_automation(ModeTrigger)
+
 def _modes_validator(value):
     if not isinstance(value, dict):
-        raise cv.Invalid("modes: must be a mapping of mode_name -> actions")
+        raise cv.Invalid("modes must be a mapping of mode_name -> action list / automation blocks")
     out = {}
     for mode_name, raw in value.items():
-        # Ensure list
+        # Normalize raw into list
         if not isinstance(raw, list):
-            # Could be a single automation dict, or a single action
+            # Single item (action or automation)
             if isinstance(raw, dict) and "then" in raw:
                 raw_list = [raw]
             else:
-                # Single action dict -> wrap
-                raw_list = [ {"then": [raw]} ]
+                raw_list = [{"then": [raw]}]
         else:
-            # raw is a list. Determine if it's already a list of automation dicts or a list of plain actions.
+            # List given. Detect if this is a plain action list (no 'then' keys)
             treat_as_plain_actions = True
             for item in raw:
                 if isinstance(item, dict) and "then" in item:
                     treat_as_plain_actions = False
                     break
             if treat_as_plain_actions:
-                # Entire list are plain actions -> wrap into one automation block
-                raw_list = [ {"then": raw} ]
+                raw_list = [{"then": raw}]
             else:
-                # Already list of automation dicts (each must have then)
                 raw_list = raw
 
-        # Validate each automation block with standard automation schema
         norm_blocks = []
         for idx, blk in enumerate(raw_list):
             if not isinstance(blk, dict):
-                raise cv.Invalid(f"Mode '{mode_name}' entry #{idx} must be a dict.")
+                raise cv.Invalid(f"Mode '{mode_name}' entry #{idx} must be a dict")
             if "then" not in blk:
-                raise cv.Invalid(f"Mode '{mode_name}' automation #{idx} missing 'then:' section")
-            # Let automation.validate_automation() process it (returns list with trigger dicts)
-            validated_list = automation.validate_automation()(blk)
-            # That returns a list; we append its (single) element
+                raise cv.Invalid(f"Mode '{mode_name}' automation #{idx} missing 'then:'")
+            # Validate & generate trigger id etc.
+            validated_list = MODE_AUTOMATION(blk)  # returns list with 1 element
             norm_blocks.extend(validated_list)
         out[mode_name] = norm_blocks
     return out
@@ -108,9 +105,8 @@ async def to_code(config):
             if first_mode is None:
                 first_mode = mode_name
             for auto_conf in automation_list:
-                trig = cg.new_Pvariable(auto_conf[automation.CONF_TRIGGER_ID], var)
+                trig = cg.new_Pvariable(auto_conf[automation.CONF_TRIGGER_ID])
                 cg.add(var.add_mode_trigger(mode_name, trig))
                 await automation.build_automation(trig, [], auto_conf)
-        # Initialize starting mode to the first one declared (if any)
         if first_mode is not None:
             cg.add(var.set_initial_mode(first_mode))
