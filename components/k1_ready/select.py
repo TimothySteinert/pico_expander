@@ -1,12 +1,12 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import select
+from esphome.components import select, api
 from esphome.const import CONF_ID
 
 from . import k1_ready_ns
 
-# Now also a CustomAPIDevice to register the ready_update service
-K1ReadySelect = k1_ready_ns.class_("K1ReadySelect", select.Select, cg.Component, cg.api.CustomAPIDevice)
+# Correct: use api.CustomAPIDevice (NOT cg.api.CustomAPIDevice)
+K1ReadySelect = k1_ready_ns.class_("K1ReadySelect", select.Select, cg.Component, api.CustomAPIDevice)
 
 CONF_OPTIONS = "options"
 CONF_INITIAL_OPTION = "initial_option"
@@ -38,18 +38,17 @@ CONFIG_SCHEMA = (
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
 
-    # Options
     for opt in config[CONF_OPTIONS]:
         cg.add(var.add_option(opt))
+
     if CONF_INITIAL_OPTION in config:
         cg.add(var.set_initial_option(config[CONF_INITIAL_OPTION]))
 
     cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
     cg.add(var.set_restore_value(config[CONF_RESTORE_VALUE]))
 
-    # Register component & select
     await cg.register_component(var, config)
     await select.register_select(var, config)
 
-    # Register the API service (bool params)
+    # Register the ready_update API service
     cg.add(var.register_ready_update_service())
