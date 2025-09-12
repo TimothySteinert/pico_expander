@@ -24,17 +24,22 @@ void K1AlarmListener::setup() {
   }
   publish_initial_connection_timeout_();
 
+  // Subscribe base state
   this->subscribe_homeassistant_state(&K1AlarmListener::ha_state_callback_, this->alarm_entity_);
   subscription_started_ = true;
   ESP_LOGI(TAG, "Subscribed to '%s' (type=%s)", alarm_entity_.c_str(),
            alarm_type_ == AlarmIntegrationType::ALARMO ? "alarmo" : "other");
 
+  // Attributes if alarmo
   if (alarm_type_ == AlarmIntegrationType::ALARMO) {
     this->subscribe_homeassistant_state(&K1AlarmListener::arm_mode_attr_callback_, this->alarm_entity_, "arm_mode");
     this->subscribe_homeassistant_state(&K1AlarmListener::next_state_attr_callback_, this->alarm_entity_, "next_state");
     this->subscribe_homeassistant_state(&K1AlarmListener::bypassed_attr_callback_, this->alarm_entity_, "bypassed_sensors");
-    ESP_LOGI(TAG, "Attribute subscriptions enabled");
   }
+
+  // Register service for final overrides
+  // Service name: failed_arm (string reason)
+  this->register_service(&K1AlarmListener::on_failed_arm_service_, "failed_arm", {"reason"});
 
   last_api_connected_ = api_connected_now_();
   update_connection_sensor_(last_api_connected_);
@@ -49,16 +54,74 @@ void K1AlarmListener::loop() {
     last_api_connected_ = connected;
     update_connection_sensor_(connected);
     if (!connected) {
+      // connection timeout overrides any current override
+      clear_override_();
       publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
       waiting_for_transitional_attrs_ = false;
     } else {
       publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
       waiting_for_transitional_attrs_ = false;
+      // underlying states will republish when they arrive
     }
   }
 }
 
-// ---------- Connection ----------
+// ---------- Service: failed_arm ----------
+void K1AlarmListener::on_failed_arm_service_(std::string reason) {
+  std::string r = lower_copy_(trim_copy_(reason));
+
+  if (!can_apply_override_()) {
+    ESP_LOGD(TAG, "Ignoring failed_arm '%s' because base state is connection_timeout", r.c_str());
+    return;
+  }
+
+  if (r == "invalid_code" || r == "not_allowed") {
+    start_override_("incorrect_pin", incorrect_pin_timeout_ms_);
+  } else if (r == "open_sensors") {
+    start_override_("failed_open_sensors", failed_open_sensors_timeout_ms_);
+  } else {
+    ESP_LOGW(TAG, "Unknown failed_arm reason '%s' (ignored)", r.c_str());
+  }
+}
+
+// ---------- Override handling ----------
+bool K1AlarmListener::can_apply_override_() const {
+  // Do not override if current displayed state is connection_timeout OR
+  // base indicates connection timeout (still awaiting HA)
+  if (!last_api_connected_) return false;
+  if (current_base_state_.empty()) return false;
+  if (current_base_state_ == CONNECTION_TIMEOUT_STATE) return false;
+  if (last_published_state_ == CONNECTION_TIMEOUT_STATE) {
+    // Still in placeholder state
+    return false;
+  }
+  return true;
+}
+
+void K1AlarmListener::start_override_(const std::string &state, uint32_t duration_ms) {
+  // Cancel existing override timer if any
+  if (override_cancel_) override_cancel_.cancel();
+  override_active_ = true;
+  override_state_ = state;
+  ESP_LOGD(TAG, "Starting override state '%s' for %u ms", state.c_str(), (unsigned) duration_ms);
+  publish_state_if_changed_(override_state_);
+
+  override_cancel_ = this->set_timeout(duration_ms, [this]() {
+    ESP_LOGD(TAG, "Override '%s' expired", override_state_.c_str());
+    this->clear_override_();
+    // After clearing, recompute & publish underlying state (coalesced path)
+    this->schedule_publish_();
+  });
+}
+
+void K1AlarmListener::clear_override_() {
+  if (!override_active_) return;
+  if (override_cancel_) override_cancel_.cancel();
+  override_active_ = false;
+  override_state_.clear();
+}
+
+// ---------- Connection Helpers ----------
 bool K1AlarmListener::api_connected_now_() const {
 #ifdef USE_API
   if (api::global_api_server == nullptr) return false;
@@ -73,6 +136,7 @@ void K1AlarmListener::update_connection_sensor_(bool connected) {
 }
 void K1AlarmListener::enforce_connection_state_() {
   if (!last_api_connected_) {
+    clear_override_();
     publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
     waiting_for_transitional_attrs_ = false;
   }
@@ -124,12 +188,11 @@ void K1AlarmListener::ha_state_callback_(std::string state) {
   schedule_publish_();
 }
 
-// ---------- Coalesced publish control ----------
+// ---------- Coalesced publishing ----------
 void K1AlarmListener::schedule_publish_() {
   pending_publish_ = true;
   if (publish_scheduled_) return;
   publish_scheduled_ = true;
-  // Defer to end-of-cycle to aggregate all attributes & state
   this->set_timeout(0, [this]() { this->finalize_publish_(); });
 }
 
@@ -138,13 +201,21 @@ void K1AlarmListener::finalize_publish_() {
   if (!pending_publish_) return;
   pending_publish_ = false;
 
-  // Always honor connection timeout
+  // If an override is active, we only allow connection_timeout to supersede it.
+  if (override_active_) {
+    if (!last_api_connected_ || current_base_state_ == CONNECTION_TIMEOUT_STATE) {
+      clear_override_();
+      publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
+    }
+    // Otherwise do nothing (keep override).
+    return;
+  }
+
   if (!last_api_connected_) {
     publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
     return;
   }
   if (current_base_state_.empty()) {
-    // Nothing yet (still awaiting first state)
     publish_state_if_changed_(CONNECTION_TIMEOUT_STATE);
     return;
   }
@@ -153,13 +224,11 @@ void K1AlarmListener::finalize_publish_() {
     return;
   }
 
-  // OTHER integration: straight pass-through
   if (alarm_type_ == AlarmIntegrationType::OTHER) {
     publish_state_if_changed_(current_base_state_);
     return;
   }
 
-  // ALARMO path
   bool transitional = is_transitional_(current_base_state_);
   if (transitional) {
     bool have = have_transitional_attrs_(current_base_state_);
@@ -167,32 +236,28 @@ void K1AlarmListener::finalize_publish_() {
       waiting_for_transitional_attrs_ = true;
       if (publish_retry_count_ < MAX_PUBLISH_RETRIES) {
         publish_retry_count_++;
-        // Retry next loop – still show connection_timeout (placeholder) – no flicker
-        schedule_publish_();
+        schedule_publish_();  // retry quickly
         return;
       } else {
-        // Give up – publish generic transitional state (rare fallback)
+        // Fallback: publish generic transitional state
         publish_state_if_changed_(current_base_state_);
         waiting_for_transitional_attrs_ = false;
         publish_retry_count_ = 0;
         return;
       }
     }
-    // Got required attributes
     waiting_for_transitional_attrs_ = false;
     publish_retry_count_ = 0;
   } else {
-    // For armed_* states we publish immediately (no wait for bypass)
     waiting_for_transitional_attrs_ = false;
     publish_retry_count_ = 0;
   }
 
   std::string inferred = infer_state_(current_base_state_);
-  last_inferred_state_ = inferred;
   publish_state_if_changed_(inferred);
 }
 
-// ---------- Mapping & inference helpers ----------
+// ---------- Mapping & inference ----------
 std::string K1AlarmListener::map_alarm_state_(const std::string &raw_in) const {
   std::string raw = lower_copy_(trim_copy_(raw_in));
   if (raw == "unavailable" || raw == "unknown")
@@ -208,7 +273,6 @@ bool K1AlarmListener::have_transitional_attrs_(const std::string &mapped) const 
   if (mapped == "pending") return attr_.arm_mode_seen || attr_.next_state_seen;
   return true;
 }
-
 bool K1AlarmListener::is_truthy_list_(const std::string &v) const {
   if (v.empty()) return false;
   std::string low = lower_copy_(trim_copy_(v));
@@ -225,31 +289,28 @@ std::string K1AlarmListener::infer_state_(const std::string &mapped) const {
   std::string next_state = lower_copy_(trim_copy_(attr_.next_state));
   bool bypassed_non_empty = is_truthy_list_(attr_.bypassed_sensors);
 
-  // Transitional
   if (mapped == "arming") {
     if (arm_mode == "armed_home") return "arming_home";
     if (arm_mode == "armed_away") return "arming_away";
     if (arm_mode == "armed_night") return "arming_night";
     if (arm_mode == "armed_vacation") return "arming_vacation";
     if (arm_mode == "armed_custom_bypass") return "arming_custom";
-    return mapped;  // fallback if unknown mode
+    return mapped;
   }
   if (mapped == "pending") {
-    if (arm_mode == "armed_home"        || next_state == "armed_home")        return "pending_home";
-    if (arm_mode == "armed_away"        || next_state == "armed_away")        return "pending_away";
-    if (arm_mode == "armed_night"       || next_state == "armed_night")       return "pending_night";
-    if (arm_mode == "armed_vacation"    || next_state == "armed_vacation")    return "pending_vacation";
+    if (arm_mode == "armed_home"     || next_state == "armed_home")     return "pending_home";
+    if (arm_mode == "armed_away"     || next_state == "armed_away")     return "pending_away";
+    if (arm_mode == "armed_night"    || next_state == "armed_night")    return "pending_night";
+    if (arm_mode == "armed_vacation" || next_state == "armed_vacation") return "pending_vacation";
     if (arm_mode == "armed_custom_bypass" || next_state == "armed_custom_bypass") return "pending_custom";
     return mapped;
   }
 
-  // Armed steady states – publish immediately; upgrade later if bypass attr appears
   if (mapped == "armed_home")       return bypassed_non_empty ? "armed_home_bypass" : "armed_home";
   if (mapped == "armed_away")       return bypassed_non_empty ? "armed_away_bypass" : "armed_away";
   if (mapped == "armed_night")      return bypassed_non_empty ? "armed_night_bypass" : "armed_night";
   if (mapped == "armed_vacation")   return bypassed_non_empty ? "armed_vacation_bypass" : "armed_vacation";
   if (mapped == "armed_custom_bypass") {
-    // Alarmo uses armed_custom_bypass as the base for custom force; normalize
     return bypassed_non_empty ? "armed_custom_bypass" : "armed_custom";
   }
 
@@ -270,6 +331,7 @@ void K1AlarmListener::publish_state_if_changed_(const std::string &st) {
     return;
   }
   if (!last_api_connected_ && st != CONNECTION_TIMEOUT_STATE) return;
+
   if (st == last_published_state_) {
     ESP_LOGV(TAG, "State unchanged (%s)", st.c_str());
     return;
@@ -298,10 +360,15 @@ void K1AlarmListener::dump_config() {
   ESP_LOGCONFIG(TAG, "K1 Alarm Listener:");
   ESP_LOGCONFIG(TAG, "  Alarm Entity: %s", alarm_entity_.c_str());
   ESP_LOGCONFIG(TAG, "  Alarm Type: %s", alarm_type_ == AlarmIntegrationType::ALARMO ? "alarmo" : "other");
+  ESP_LOGCONFIG(TAG, "  Incorrect PIN Timeout: %u ms", (unsigned) incorrect_pin_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "  Failed Open Sensors Timeout: %u ms", (unsigned) failed_open_sensors_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Subscription: %s", subscription_started_ ? "started" : "not started");
   ESP_LOGCONFIG(TAG, "  API Connected (last): %s", last_api_connected_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Override Active: %s", override_active_ ? "YES" : "NO");
+  if (override_active_)
+    ESP_LOGCONFIG(TAG, "    Override State: %s", override_state_.c_str());
   if (alarm_type_ == AlarmIntegrationType::ALARMO) {
-    ESP_LOGCONFIG(TAG, "  Attributes seen: arm_mode=%s next_state=%s bypassed=%s",
+    ESP_LOGCONFIG(TAG, "  Attr seen: arm_mode=%s next_state=%s bypassed=%s",
                   attr_.arm_mode_seen ? "Y":"N",
                   attr_.next_state_seen ? "Y":"N",
                   attr_.bypassed_seen ? "Y":"N");
