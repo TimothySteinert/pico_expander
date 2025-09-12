@@ -38,7 +38,8 @@ void TestStatesComponent::fire_for_mode_(const std::string &mode) {
   else if (mode == "mode4") vec = &mode4_trigs_;
   else if (mode == "mode5") vec = &mode5_trigs_;
   if (!vec) return;
-  for (auto *t : *vec) if (t) t->trigger();
+  for (auto *t : *vec)
+    if (t) t->trigger();
 }
 
 }  // namespace test_states
