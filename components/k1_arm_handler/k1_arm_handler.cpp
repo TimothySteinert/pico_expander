@@ -97,23 +97,17 @@ void K1ArmHandlerComponent::invoke_script_(const std::string &mode,
                                            bool skip_delay_flag,
                                            const std::string &prefix) {
   if (!callback_script_) {
-    ESP_LOGW(TAG, "No callback script configured; doing nothing.");
+    ESP_LOGW(TAG, "No callback script configured; skipping.");
     return;
   }
-
-  // Script parameters (must match YAML 'parameters:' order)
-  std::vector<std::string> params;
-  params.emplace_back(mode);                     // param 0
-  params.emplace_back(pin);                      // param 1
-  params.emplace_back(force_flag ? "1" : "0");   // param 2
-  params.emplace_back(skip_delay_flag ? "1" : "0"); // param 3
-  params.emplace_back(prefix);                   // param 4
-
-  ESP_LOGD(TAG, "Calling script with params: mode=%s pin=%s force=%s skip=%s prefix=%s",
-           params[0].c_str(), params[1].c_str(),
-           params[2].c_str(), params[3].c_str(), params[4].c_str());
-
-  callback_script_->execute(params);
+  // Pass booleans as "1"/"0" string flags to match YAML (string) parameter types.
+  callback_script_->execute(
+      mode,
+      pin,
+      force_flag ? std::string("1") : std::string("0"),
+      skip_delay_flag ? std::string("1") : std::string("0"),
+      prefix
+  );
 }
 
 }  // namespace k1_arm_handler
