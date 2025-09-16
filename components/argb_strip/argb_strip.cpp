@@ -1,6 +1,6 @@
+// NOTE: This file is the 16c base plus ACTION mode additions (version 16d)
 #include "argb_strip.h"
 #include "esphome/core/log.h"
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <algorithm>
@@ -11,7 +11,6 @@
 #endif
 
 #ifdef USE_ESP32
-
 static int g_argb_instances = 0;
 
 namespace esphome {
@@ -24,10 +23,10 @@ static const uint32_t T0L = 34;
 static const uint32_t T1H = 32;
 static const uint32_t T1L = 18;
 
-// ---------------- Group Management ----------------
+// Group management
 void ARGBStripComponent::add_group(const std::string &name, const std::vector<int> &leds, uint16_t cap) {
   groups_[name] = leds;
-  group_caps_[name] = cap; // 0-255
+  group_caps_[name] = cap;
 }
 const std::vector<int> *ARGBStripComponent::get_group(const std::string &name) const {
   auto it = groups_.find(name);
@@ -40,12 +39,19 @@ uint16_t ARGBStripComponent::get_group_cap(const std::string &name) const {
   return it->second;
 }
 
-// ---------------- Lifecycle ----------------
+void ARGBStripComponent::set_scaling_mode(const std::string &m) {
+  std::string mm = m;
+  std::transform(mm.begin(), mm.end(), mm.begin(), ::tolower);
+  if (mm == "clamp") scaling_mode_ = ScalingMode::CLAMP;
+  else if (mm == "perceptual") scaling_mode_ = ScalingMode::PERCEPTUAL;
+  else scaling_mode_ = ScalingMode::LINEAR;
+}
+
+// Lifecycle
 void ARGBStripComponent::setup() {
   int inst = ++g_argb_instances;
   ESP_LOGI(TAG, "Setup instance #%d, version %s", inst, ARGB_STRIP_VERSION);
 
-  ESP_LOGCONFIG(TAG, "ARGB Strip v%s", ARGB_STRIP_VERSION);
   if (!pin_ || raw_gpio_ < 0) {
     ESP_LOGE(TAG, "Invalid pin configuration");
     this->mark_failed();
@@ -59,7 +65,6 @@ void ARGBStripComponent::setup() {
   last_sent_grb_.assign(num_leds_ * 3, 255);
 
   init_rmt_();
-  ESP_LOGI(TAG, "RMT pin configured: %d (ready=%d)", raw_gpio_, (int) rmt_ready_);
   if (!rmt_ready_) {
     ESP_LOGE(TAG, "RMT init failed");
     this->mark_failed();
@@ -73,26 +78,23 @@ void ARGBStripComponent::setup() {
 
   rainbow_start_ms_ = millis();
   rfid_transition_ = RfidTransitionState::INACTIVE;
+  build_gamma_lut_if_needed_();
+  action_rainbow_start_ms_ = rainbow_start_ms_; // initialize
   mark_dirty_();
 }
 
 void ARGBStripComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "ARGB Strip:");
+  ESP_LOGCONFIG(TAG, "ARGB Strip v%s", ARGB_STRIP_VERSION);
   LOG_PIN("  Pin: ", pin_);
   ESP_LOGCONFIG(TAG, "  Raw GPIO: %d", raw_gpio_);
   ESP_LOGCONFIG(TAG, "  LEDs: %u", num_leds_);
-  ESP_LOGCONFIG(TAG, "  RMT Ready: %s", rmt_ready_ ? "YES":"NO");
-  ESP_LOGCONFIG(TAG, "  Mode: %s", strip_mode_ == StripMode::NORMAL ? "NORMAL" : "RFID_PROGRAM");
-  ESP_LOGCONFIG(TAG, "  RFID Transition: %d", (int) rfid_transition_);
-  ESP_LOGCONFIG(TAG, "  Arm Select Mode: %d", (int) arm_select_mode_);
-  ESP_LOGCONFIG(TAG, "  Arm Disable Pending: %s", arm_select_disable_pending_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Scaling Mode: %d", (int)scaling_mode_);
+  ESP_LOGCONFIG(TAG, "  Perceptual Gamma: %.3f", perceptual_gamma_);
   ESP_LOGCONFIG(TAG, "  Rainbow Cycle (ms): %u", rainbow_cycle_ms_);
-  if (!groups_.empty()) {
-    ESP_LOGCONFIG(TAG, "  Groups:");
-    for (auto &kv : groups_) {
-      ESP_LOGCONFIG(TAG, "    %s -> %u pixel(s), cap=%u",
-        kv.first.c_str(), (unsigned)kv.second.size(), (unsigned)get_group_cap(kv.first));
-    }
+  ESP_LOGCONFIG(TAG, "  ACTION Cycle (ms): %u", ACTION_RAINBOW_CYCLE_MS);
+  for (auto &kv : groups_) {
+    ESP_LOGCONFIG(TAG, "    Group %s size=%u cap=%u",
+                  kv.first.c_str(), (unsigned)kv.second.size(), (unsigned)get_group_cap(kv.first));
   }
 }
 
@@ -114,7 +116,7 @@ void ARGBStripComponent::loop() {
     }
   } else {
     if (arm_select_mode_ != ArmSelectMode::NONE && anim_tick) {
-      mark_dirty_();
+      mark_dirty_(); // ensures ACTION rainbow animates
     }
     if (arm_select_disable_pending_) {
       uint32_t phase = (now % (FLASH_ON_MS + FLASH_OFF_MS));
@@ -134,7 +136,7 @@ void ARGBStripComponent::loop() {
   }
 }
 
-// ---------------- RMT Init ----------------
+// RMT init
 void ARGBStripComponent::init_rmt_() {
   rmt_tx_channel_config_t ch_cfg{};
   ch_cfg.gpio_num = (gpio_num_t) raw_gpio_;
@@ -143,44 +145,26 @@ void ARGBStripComponent::init_rmt_() {
   ch_cfg.mem_block_symbols = 64;
   ch_cfg.trans_queue_depth = 4;
 
-  if (rmt_new_tx_channel(&ch_cfg, &tx_channel_) != ESP_OK) {
-    ESP_LOGE(TAG, "rmt_new_tx_channel failed");
-    return;
-  }
+  if (rmt_new_tx_channel(&ch_cfg, &tx_channel_) != ESP_OK) return;
 
   rmt_bytes_encoder_config_t bcfg{};
-  bcfg.bit0.level0 = 1;
-  bcfg.bit0.duration0 = T0H;
-  bcfg.bit0.level1 = 0;
-  bcfg.bit0.duration1 = T0L;
-  bcfg.bit1.level0 = 1;
-  bcfg.bit1.duration0 = T1H;
-  bcfg.bit1.level1 = 0;
-  bcfg.bit1.duration1 = T1L;
+  bcfg.bit0.level0 = 1; bcfg.bit0.duration0 = T0H;
+  bcfg.bit0.level1 = 0; bcfg.bit0.duration1 = T0L;
+  bcfg.bit1.level0 = 1; bcfg.bit1.duration0 = T1H;
+  bcfg.bit1.level1 = 0; bcfg.bit1.duration1 = T1L;
   bcfg.flags.msb_first = 1;
-
-  if (rmt_new_bytes_encoder(&bcfg, &bytes_encoder_) != ESP_OK) {
-    ESP_LOGE(TAG, "rmt_new_bytes_encoder failed");
-    return;
-  }
+  if (rmt_new_bytes_encoder(&bcfg, &bytes_encoder_) != ESP_OK) return;
 
   rmt_copy_encoder_config_t cpy_cfg{};
-  if (rmt_new_copy_encoder(&cpy_cfg, &copy_encoder_) != ESP_OK) {
-    ESP_LOGE(TAG, "rmt_new_copy_encoder failed");
-    return;
-  }
+  if (rmt_new_copy_encoder(&cpy_cfg, &copy_encoder_) != ESP_OK) return;
 
-  if (rmt_enable(tx_channel_) != ESP_OK) {
-    ESP_LOGE(TAG, "rmt_enable failed");
-    return;
-  }
+  if (rmt_enable(tx_channel_) != ESP_OK) return;
 
   tx_cfg_.loop_count = 0;
   rmt_ready_ = true;
-  ESP_LOGD(TAG, "RMT channel initialized on GPIO %d", raw_gpio_);
 }
 
-// ---------------- Base Channel Writes ----------------
+// Writes
 void ARGBStripComponent::update_group_channel(const std::string &group, uint8_t channel, uint8_t value) {
   std::string target_group = get_arm_select_group_name_();
   bool defer = (arm_select_mode_ != ArmSelectMode::NONE) &&
@@ -204,15 +188,15 @@ void ARGBStripComponent::update_group_channel(const std::string &group, uint8_t 
     if (led < 0 || (uint16_t)led >= num_leds_) continue;
     uint32_t base = led * 3;
     switch (channel) {
-      case 0: base_raw_grb_[base + 1] = value; break; // R channel stored as GRB
-      case 1: base_raw_grb_[base + 0] = value; break; // G
-      case 2: base_raw_grb_[base + 2] = value; break; // B
+      case 0: base_raw_grb_[base + 1] = value; break;
+      case 1: base_raw_grb_[base + 0] = value; break;
+      case 2: base_raw_grb_[base + 2] = value; break;
     }
   }
   if (!rfid_visual_active_()) mark_dirty_();
 }
 
-// ---------------- Internal Control ----------------
+// Control
 void ARGBStripComponent::enable_rfid_mode() {
   if (strip_mode_ == StripMode::RFID_PROGRAM && rfid_visual_active_()) return;
   strip_mode_ = StripMode::RFID_PROGRAM;
@@ -223,8 +207,7 @@ void ARGBStripComponent::enable_rfid_mode() {
 }
 
 void ARGBStripComponent::disable_rfid_mode() {
-  if (strip_mode_ != StripMode::RFID_PROGRAM || rfid_transition_ == RfidTransitionState::FADE_OUT)
-    return;
+  if (strip_mode_ != StripMode::RFID_PROGRAM || rfid_transition_ == RfidTransitionState::FADE_OUT) return;
   rfid_transition_ = RfidTransitionState::FADE_OUT;
   rfid_transition_start_ms_ = millis();
   mark_dirty_();
@@ -251,7 +234,8 @@ void ARGBStripComponent::set_arm_select_mode(ArmSelectMode m) {
     case ArmSelectMode::DISARM: new_group = "disarm"; break;
     case ArmSelectMode::NIGHT:
     case ArmSelectMode::VACATION:
-    case ArmSelectMode::BYPASS: new_group = "custom"; break;
+    case ArmSelectMode::BYPASS:
+    case ArmSelectMode::ACTION: new_group = "custom"; break;
     default: break;
   }
 
@@ -272,6 +256,9 @@ void ARGBStripComponent::set_arm_select_mode(ArmSelectMode m) {
   }
 
   arm_select_mode_ = m;
+  if (m == ArmSelectMode::ACTION) {
+    action_rainbow_start_ms_ = millis();
+  }
 
   if (arm_select_mode_ != ArmSelectMode::NONE && !new_group.empty()) {
     if (prev_group != new_group) {
@@ -295,7 +282,7 @@ void ARGBStripComponent::finalize_arm_select_disable_() {
 void ARGBStripComponent::set_arm_select_mode_by_name(const char *name) {
   if (!name) return;
   std::string s{name};
-  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+  std::transform(s.begin(), s.end(), s.begin(), ::tolower);
   ArmSelectMode m = ArmSelectMode::NONE;
   if (s == "away") m = ArmSelectMode::AWAY;
   else if (s == "home") m = ArmSelectMode::HOME;
@@ -303,6 +290,7 @@ void ARGBStripComponent::set_arm_select_mode_by_name(const char *name) {
   else if (s == "night") m = ArmSelectMode::NIGHT;
   else if (s == "vacation") m = ArmSelectMode::VACATION;
   else if (s == "bypass") m = ArmSelectMode::BYPASS;
+  else if (s == "action") m = ArmSelectMode::ACTION;
   set_arm_select_mode(m);
 }
 
@@ -326,7 +314,7 @@ void ARGBStripComponent::apply_pending_for_group_(const std::string &group) {
   if (!rfid_visual_active_()) mark_dirty_();
 }
 
-// ---------------- Helpers ----------------
+// Helpers
 std::string ARGBStripComponent::get_arm_select_group_name_() const {
   switch (arm_select_mode_) {
     case ArmSelectMode::AWAY: return "away";
@@ -334,7 +322,8 @@ std::string ARGBStripComponent::get_arm_select_group_name_() const {
     case ArmSelectMode::DISARM: return "disarm";
     case ArmSelectMode::NIGHT:
     case ArmSelectMode::VACATION:
-    case ArmSelectMode::BYPASS: return "custom";
+    case ArmSelectMode::BYPASS:
+    case ArmSelectMode::ACTION: return "custom";
     default: return "";
   }
 }
@@ -370,7 +359,7 @@ float ARGBStripComponent::current_rfid_fade_factor_() const {
   return 0.0f;
 }
 
-// ---------------- Recomposition ----------------
+// Recomposition
 void ARGBStripComponent::recomposite_() {
   if (rfid_visual_active_()) {
     float f = current_rfid_fade_factor_();
@@ -381,7 +370,7 @@ void ARGBStripComponent::recomposite_() {
       apply_arm_select_overlay_();
     }
   }
-  apply_group_caps_();  // enforce per-group caps LAST
+  apply_group_caps_();
 }
 
 void ARGBStripComponent::build_normal_base_() {
@@ -392,14 +381,12 @@ void ARGBStripComponent::build_rainbow_frame_(float fade_factor) {
   if (num_leds_ == 0) return;
   working_grb_.assign(num_leds_ * 3, 0);
   if (fade_factor <= 0.0f) return;
-
   uint32_t now = millis();
   uint32_t elapsed = now - rainbow_start_ms_;
   float base_h = fmodf((float)elapsed / (float)rainbow_cycle_ms_, 1.0f);
-
   for (uint16_t i = 0; i < num_leds_; i++) {
     float h = fmodf(base_h + (float)i / (float)num_leds_, 1.0f);
-    uint8_t g, r, b;
+    uint8_t g,r,b;
     hsv_to_grb_(h, 1.0f, 1.0f, g, r, b);
     if (fade_factor < 0.999f) {
       g = (uint8_t)(g * fade_factor + 0.5f);
@@ -418,9 +405,30 @@ void ARGBStripComponent::apply_arm_select_overlay_() {
     return;
   if (rfid_visual_active_()) return;
 
+  // ACTION rainbow mode
+  if (arm_select_mode_ == ArmSelectMode::ACTION) {
+    const std::string group_name = "custom";
+    const auto *grp = get_group(group_name);
+    if (!grp || grp->empty()) return;
+    uint32_t now = millis();
+    float base = (float)((now - action_rainbow_start_ms_) % ACTION_RAINBOW_CYCLE_MS) / (float)ACTION_RAINBOW_CYCLE_MS;
+    for (size_t idx = 0; idx < grp->size(); ++idx) {
+      int led = (*grp)[idx];
+      if (led < 0 || (uint16_t)led >= num_leds_) continue;
+      float h = fmodf(base + (float)idx / (float)grp->size(), 1.0f);
+      uint8_t g,r,b;
+      hsv_to_grb_(h, 1.0f, 1.0f, g, r, b);
+      uint32_t base_i = led * 3;
+      working_grb_[base_i + 0] = g;
+      working_grb_[base_i + 1] = r;
+      working_grb_[base_i + 2] = b;
+    }
+    return;
+  }
+
+  // Existing flash logic
   int led_index = get_arm_select_led_index_();
   if (led_index < 0) return;
-
   uint32_t now = millis();
   uint32_t phase = (now % (FLASH_ON_MS + FLASH_OFF_MS));
   bool on_phase = phase < FLASH_ON_MS;
@@ -444,25 +452,61 @@ void ARGBStripComponent::apply_arm_select_overlay_() {
   }
 }
 
+// Scaling
+void ARGBStripComponent::build_gamma_lut_if_needed_() {
+  if (!build_gamma_lut_) return;
+  build_gamma_lut_ = false;
+  for (int i=0;i<256;i++) {
+    float norm = i / 255.0f;
+    gamma_lut_[i] = (uint8_t)(powf(norm, perceptual_gamma_) * 255.0f + 0.5f);
+  }
+}
+
 void ARGBStripComponent::apply_group_caps_() {
-  // For each group: if cap < 255 scale channel value = (value * cap) / 255
+  build_gamma_lut_if_needed_();
   for (auto &kv : groups_) {
     uint16_t cap = get_group_cap(kv.first);
-    if (cap >= 255) continue;
-    // Precompute factor as float for fewer rounding artifacts
-    float factor = (float)cap / 255.0f;
+    if (cap == 0) {
+      // All off
+      for (int led : kv.second) {
+        if (led < 0 || (uint16_t)led >= num_leds_) continue;
+        uint32_t base = led * 3;
+        working_grb_[base+0]=0; working_grb_[base+1]=0; working_grb_[base+2]=0;
+      }
+      continue;
+    }
+    if (cap >= 255 && scaling_mode_ == ScalingMode::LINEAR) {
+      // No change needed in pure linear full-bright case
+      continue;
+    }
+
     for (int led : kv.second) {
       if (led < 0 || (uint16_t)led >= num_leds_) continue;
       uint32_t base = led * 3;
-      // Scale each channel
-      working_grb_[base + 0] = (uint8_t)(working_grb_[base + 0] * factor + 0.5f);
-      working_grb_[base + 1] = (uint8_t)(working_grb_[base + 1] * factor + 0.5f);
-      working_grb_[base + 2] = (uint8_t)(working_grb_[base + 2] * factor + 0.5f);
+      for (int c=0;c<3;c++) {
+        uint8_t v = working_grb_[base + c];
+        uint8_t out = v;
+        switch (scaling_mode_) {
+          case ScalingMode::LINEAR:
+            out = (uint8_t)( (uint32_t)v * cap / 255 );
+            break;
+          case ScalingMode::CLAMP:
+            if (v > cap) out = (uint8_t) cap;
+            break;
+          case ScalingMode::PERCEPTUAL: {
+            // Apply perceptual curve then scale to cap
+            uint8_t p = gamma_lut_[v];  // p in 0..255 perceptual
+            out = (uint8_t)((uint32_t)p * cap / 255);
+            break;
+          }
+        }
+        working_grb_[base + c] = out;
+      }
     }
   }
 }
 
-// ---------------- Sending ----------------
+// Send
 void ARGBStripComponent::send_frame_() {
   if (!rmt_ready_ || num_leds_ == 0) return;
   bool changed = false;
@@ -472,15 +516,8 @@ void ARGBStripComponent::send_frame_() {
   if (!changed) return;
 
   esp_err_t err = rmt_transmit(tx_channel_, bytes_encoder_, working_grb_.data(), working_grb_.size(), &tx_cfg_);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "rmt_transmit (data) failed err=0x%X", err);
-    return;
-  }
-  err = rmt_tx_wait_all_done(tx_channel_, pdMS_TO_TICKS(20));
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "rmt_tx_wait_all_done (data) err=0x%X", err);
-    return;
-  }
+  if (err != ESP_OK) return;
+  if (rmt_tx_wait_all_done(tx_channel_, pdMS_TO_TICKS(20)) != ESP_OK) return;
   err = rmt_transmit(tx_channel_, copy_encoder_, &reset_symbol_, sizeof(reset_symbol_), &tx_cfg_);
   if (err == ESP_OK) {
     rmt_tx_wait_all_done(tx_channel_, pdMS_TO_TICKS(10));
@@ -488,7 +525,7 @@ void ARGBStripComponent::send_frame_() {
   last_sent_grb_ = working_grb_;
 }
 
-// ---------------- Color Utility ----------------
+// Color util
 void ARGBStripComponent::hsv_to_grb_(float h, float s, float v, uint8_t &g, uint8_t &r, uint8_t &b) const {
   if (s <= 0.0f) {
     uint8_t val = (uint8_t)(v * 255.0f + 0.5f);
@@ -501,21 +538,21 @@ void ARGBStripComponent::hsv_to_grb_(float h, float s, float v, uint8_t &g, uint
   float p = v * (1.0f - s);
   float q = v * (1.0f - s * f);
   float t = v * (1.0f - s * (1.0f - f));
-  float rf, gf, bf;
+  float rf,gf,bf;
   switch (i) {
-    case 0: rf = v; gf = t; bf = p; break;
-    case 1: rf = q; gf = v; bf = p; break;
-    case 2: rf = p; gf = v; bf = t; break;
-    case 3: rf = p; gf = q; bf = v; break;
-    case 4: rf = t; gf = p; bf = v; break;
-    default: rf = v; gf = p; bf = q; break;
+    case 0: rf=v; gf=t; bf=p; break;
+    case 1: rf=q; gf=v; bf=p; break;
+    case 2: rf=p; gf=v; bf=t; break;
+    case 3: rf=p; gf=q; bf=v; break;
+    case 4: rf=t; gf=p; bf=v; break;
+    default: rf=v; gf=p; bf=q; break;
   }
   r = (uint8_t)(rf * 255.0f + 0.5f);
   g = (uint8_t)(gf * 255.0f + 0.5f);
   b = (uint8_t)(bf * 255.0f + 0.5f);
 }
 
-// ---------------- Output Channel ----------------
+// Output channel
 void ARGBStripOutput::write_state(float state) {
   if (!parent_) return;
   if (state < 0.f) state = 0.f;
