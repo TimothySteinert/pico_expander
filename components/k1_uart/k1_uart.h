@@ -5,6 +5,7 @@
 #ifdef USE_ESP32
 #include "driver/uart.h"
 #include "esphome/components/script/script.h"
+#include "esphome/components/select/select.h"
 #endif
 
 #include <array>
@@ -34,6 +35,11 @@ class K1UartComponent : public Component {
   void set_away_script(AlarmScript *s) { away_script_ = s; }
   void set_home_script(AlarmScript *s) { home_script_ = s; }
   void set_disarm_script(AlarmScript *s) { disarm_script_ = s; }
+  void set_night_script(AlarmScript *s) { night_script_ = s; }
+  void set_vacation_script(AlarmScript *s) { vacation_script_ = s; }
+  void set_bypass_script(AlarmScript *s) { bypass_script_ = s; }
+
+  void set_mode_selector(select::Select *sel) { mode_selector_ = sel; }
 #endif
 
   void set_force_prefix(const std::string &v) { force_prefix_ = v; }
@@ -64,27 +70,27 @@ class K1UartComponent : public Component {
   size_t ring_tail_{0};
   bool ring_full_{false};
 
-  // Buffer helpers
+  // Helpers
   void push_byte_(uint8_t b);
   bool available_() const;
   size_t size_() const;
   uint8_t peek_(size_t offset = 0) const;
   void pop_(size_t n);
 
-  // Parsing
   void parse_frames_();
   void handle_a0_(const uint8_t *frame, size_t len);
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
 
-  // Mapping
   std::string map_digit_(uint8_t code) const;
-  const char *map_arm_select_(uint8_t code) const;
+  const char *map_arm_select_(uint8_t code) const;  // returns away/home/disarm/dynamic/unknown
 
-  // Execute script (pin, force_flag, skip_flag)
   void exec_script_(AlarmScript *script,
                     const std::string &pin,
                     bool force_flag,
                     bool skip_flag);
+  void handle_dynamic_mode_(const std::string &pin,
+                            bool force_flag,
+                            bool skip_flag);
 #endif
 
   esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
@@ -93,6 +99,11 @@ class K1UartComponent : public Component {
   AlarmScript *away_script_{nullptr};
   AlarmScript *home_script_{nullptr};
   AlarmScript *disarm_script_{nullptr};
+  AlarmScript *night_script_{nullptr};
+  AlarmScript *vacation_script_{nullptr};
+  AlarmScript *bypass_script_{nullptr};
+
+  select::Select *mode_selector_{nullptr};  // Night / Vacation / Custom Bypass
 #endif
 
   std::string force_prefix_{"999"};
