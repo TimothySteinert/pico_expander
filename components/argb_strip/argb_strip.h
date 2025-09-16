@@ -12,7 +12,7 @@
 #ifdef USE_ESP32
 #include "esp_idf_version.h"
 #if ESP_IDF_VERSION_MAJOR < 5
-#error "argb_strip version 16 requires ESP-IDF v5+."
+#error "argb_strip version 16d requires ESP-IDF v5+."
 #endif
 #include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
@@ -20,7 +20,7 @@
 namespace esphome {
 namespace argb_strip {
 
-static const char *const ARGB_STRIP_VERSION = "16";
+static const char *const ARGB_STRIP_VERSION = "16d";
 
 enum class StripMode : uint8_t {
   NORMAL = 0,
@@ -34,7 +34,8 @@ enum class ArmSelectMode : uint8_t {
   DISARM,
   NIGHT,
   VACATION,
-  BYPASS
+  BYPASS,
+  ACTION          // NEW
 };
 
 enum class RfidTransitionState : uint8_t {
@@ -44,12 +45,20 @@ enum class RfidTransitionState : uint8_t {
   FADE_OUT
 };
 
+enum class ScalingMode : uint8_t {
+  LINEAR = 0,
+  CLAMP,
+  PERCEPTUAL
+};
+
 class ARGBStripComponent : public Component {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_raw_gpio(int raw) { raw_gpio_ = raw; }
   void set_num_leds(uint16_t n) { num_leds_ = n; }
   void set_rfid_rainbow_cycle_ms(uint32_t v) { rainbow_cycle_ms_ = v; }
+  void set_scaling_mode(const std::string &m);
+  void set_perceptual_gamma(float g) { perceptual_gamma_ = g; build_gamma_lut_ = true; }
 
   void add_group(const std::string &name, const std::vector<int> &leds, uint16_t cap);
   const std::vector<int> *get_group(const std::string &name) const;
@@ -76,7 +85,7 @@ class ARGBStripComponent : public Component {
   uint16_t num_leds_{0};
 
   std::map<std::string, std::vector<int>> groups_;
-  std::map<std::string, uint16_t> group_caps_;  // 0-255 caps
+  std::map<std::string, uint16_t> group_caps_;
 
   std::vector<uint8_t> base_raw_grb_;
   std::vector<uint8_t> working_grb_;
@@ -90,10 +99,14 @@ class ARGBStripComponent : public Component {
   uint32_t rfid_transition_start_ms_{0};
   static constexpr uint32_t RFID_FADE_MS = 500;
   uint32_t rainbow_start_ms_{0};
-  uint32_t rainbow_cycle_ms_{8000};  // configurable now
+  uint32_t rainbow_cycle_ms_{8000};
 
   static constexpr uint32_t FLASH_ON_MS = 400;
   static constexpr uint32_t FLASH_OFF_MS = 400;
+
+  // ACTION mode animation
+  uint32_t action_rainbow_start_ms_{0};
+  static constexpr uint32_t ACTION_RAINBOW_CYCLE_MS = 4000;  // 4s cycle
 
   struct PendingGroup {
     bool used = false;
@@ -113,6 +126,11 @@ class ARGBStripComponent : public Component {
   uint32_t last_anim_eval_{0};
   static constexpr uint32_t ANIM_TICK_MS = 40;
 
+  ScalingMode scaling_mode_{ScalingMode::LINEAR};
+  float perceptual_gamma_{2.2f};
+  bool build_gamma_lut_{true};
+  uint8_t gamma_lut_[256]{};
+
   void init_rmt_();
   void mark_dirty_() { frame_dirty_ = true; }
 
@@ -120,7 +138,8 @@ class ARGBStripComponent : public Component {
   void build_normal_base_();
   void build_rainbow_frame_(float fade_factor);
   void apply_arm_select_overlay_();
-  void apply_group_caps_();   // NEW: final per-group scaling
+  void apply_group_caps_();
+  void build_gamma_lut_if_needed_();
   void send_frame_();
 
   int get_arm_select_led_index_() const;
