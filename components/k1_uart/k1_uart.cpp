@@ -32,7 +32,7 @@ void K1UartComponent::setup() {
     return;
   }
   uart_flush_input(UART_PORT);
-  ESP_LOGI(TAG, "UART ready (A0=21, A1=2, A3=2).");
+  ESP_LOGI(TAG, "UART ready (A0=21, A1=2, A3=2, A4=2).");
 #endif
 }
 
@@ -59,7 +59,7 @@ void K1UartComponent::dump_config() {
                 vacation_script_ ? "YES":"NO",
                 bypass_script_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  Dynamic selector: %s", mode_selector_ ? "YES":"NO");
-  ESP_LOGCONFIG(TAG, "  Arm strip: %s", arm_strip_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Arm strip / RFID control: %s", arm_strip_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  force_prefix='%s' skip_delay_prefix='%s'",
                 force_prefix_.c_str(), skip_delay_prefix_.c_str());
   ESP_LOGCONFIG(TAG, "  Buzzer: %s", buzzer_ ? "YES":"NO");
@@ -141,6 +141,7 @@ void K1UartComponent::parse_frames_() {
     if (id == ID_A0) needed = LEN_A0;
     else if (id == ID_A1) needed = LEN_A1;
     else if (id == ID_A3) needed = LEN_A3;
+    else if (id == ID_A4) needed = LEN_A4;   // NEW
     else {
       ESP_LOGD(TAG, "UNK: %02X", id);
       pop_(1);
@@ -160,6 +161,8 @@ void K1UartComponent::parse_frames_() {
       handle_a0_(frame, needed);
     } else if (id == ID_A3) {
       handle_a3_(frame, needed);
+    } else if (id == ID_A4) {
+      handle_a4_(frame, needed);
     }
   }
 }
@@ -264,6 +267,26 @@ void K1UartComponent::handle_a3_(const uint8_t *frame, size_t len) {
   apply_arm_select_mode_(final_mode);
 }
 
+// -------- A4 (RFID strip mode control) --------
+void K1UartComponent::handle_a4_(const uint8_t *frame, size_t len) {
+  if (len != LEN_A4 || frame[0] != ID_A4) return;
+  if (!arm_strip_) {
+    ESP_LOGV(TAG, "A4 received but no arm strip configured");
+    return;
+  }
+  uint8_t code = frame[1];
+  if (code == 0x20) {
+    ESP_LOGD(TAG, "A4: Set strip NORMAL (disable RFID)");
+    arm_strip_->disable_rfid_mode();
+  } else if (code == 0x30) {
+    ESP_LOGD(TAG, "A4: Set strip RFID (enable RFID)");
+    arm_strip_->enable_rfid_mode();
+  } else {
+    ESP_LOGW(TAG, "A4 unknown code 0x%02X (expected 0x20/0x30)", code);
+  }
+}
+
+// -------- Apply arm-select LED mode --------
 void K1UartComponent::apply_arm_select_mode_(const std::string &mode_name) {
   if (!arm_strip_) {
     ESP_LOGV(TAG, "Arm strip not configured; ignoring arm-select mode set");
@@ -302,6 +325,7 @@ void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
   if (id == ID_A0) ESP_LOGD(TAG, "A0 (%u): %s", (unsigned)len, hex_part);
   else if (id == ID_A1) ESP_LOGD(TAG, "A1 (%u): %s", (unsigned)len, hex_part);
   else if (id == ID_A3) ESP_LOGD(TAG, "A3 (%u): %s", (unsigned)len, hex_part);
+  else if (id == ID_A4) ESP_LOGD(TAG, "A4 (%u): %s", (unsigned)len, hex_part);
   else ESP_LOGD(TAG, "ID %02X (%u): %s", id, (unsigned)len, hex_part);
 }
 #endif  // USE_ESP32
