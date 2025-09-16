@@ -45,7 +45,7 @@ void K1UartComponent::loop() {
     parse_frames_();
   }
 
-  // Pinmode expiry check (use esp_timer_get_time)
+  // Pinmode expiry check
   uint64_t now_us = esp_timer_get_time();
   check_pinmode_expiry_(now_us);
 #endif
@@ -73,7 +73,7 @@ void K1UartComponent::dump_config() {
 }
 
 #ifdef USE_ESP32
-// Ring buffer
+// ---------------- Ring buffer helpers ----------------
 void K1UartComponent::push_byte_(uint8_t b) {
   if (ring_full_) ring_tail_ = (ring_tail_ + 1) % RING_CAP;
   ring_[ring_head_] = b;
@@ -100,7 +100,7 @@ void K1UartComponent::pop_(size_t n) {
   }
 }
 
-// Mapping
+// ---------------- Mapping helpers ----------------
 std::string K1UartComponent::map_digit_(uint8_t code) const {
   switch (code) {
     case 0x05: return "1";
@@ -138,7 +138,7 @@ std::string K1UartComponent::map_dynamic_selector_option_() const {
   return {};
 }
 
-// Parser
+// ---------------- Parser ----------------
 void K1UartComponent::parse_frames_() {
   while (available_()) {
     uint8_t id = peek_();
@@ -161,11 +161,18 @@ void K1UartComponent::parse_frames_() {
     pop_(needed);
 
     if (id == ID_A1) {
-      // Key beep
+      // Always produce key beep
       if (buzzer_) buzzer_->key_beep();
-      // Pinmode handling
-      uint64_t now_us = esp_timer_get_time();
-      update_pinmode_timeout_(now_us);
+
+      // NEW: Only enter/update pinmode if second byte NOT 0xFF and NOT 0x51
+      uint8_t code = frame[1];
+      if (code != 0xFF && code != 0x51) {
+        uint64_t now_us = esp_timer_get_time();
+        update_pinmode_timeout_(now_us);
+      } else {
+        ESP_LOGV(TAG, "A1 code 0x%02X excluded from pinmode", code);
+      }
+
     } else if (id == ID_A0) {
       handle_a0_(frame, needed);
     } else if (id == ID_A3) {
@@ -176,7 +183,7 @@ void K1UartComponent::parse_frames_() {
   }
 }
 
-// A0 handling (unchanged body except context)
+// ---------------- A0 handling ----------------
 void K1UartComponent::handle_a0_(const uint8_t *frame, size_t len) {
   if (len != LEN_A0 || frame[0] != ID_A0) return;
 
@@ -243,7 +250,7 @@ void K1UartComponent::handle_dynamic_mode_scripts_(const std::string &pin,
   exec_script_(target, pin, force_flag, skip_flag);
 }
 
-// A3 (arm select)
+// ---------------- A3 handling ----------------
 void K1UartComponent::handle_a3_(const uint8_t *frame, size_t len) {
   if (len != LEN_A3 || frame[0] != ID_A3) return;
   uint8_t code = frame[1];
@@ -266,7 +273,7 @@ void K1UartComponent::handle_a3_(const uint8_t *frame, size_t len) {
   apply_arm_select_mode_(final_mode);
 }
 
-// A4 (RFID mode)
+// ---------------- A4 handling ----------------
 void K1UartComponent::handle_a4_(const uint8_t *frame, size_t len) {
   if (len != LEN_A4 || frame[0] != ID_A4) return;
   if (!arm_strip_) {
@@ -285,12 +292,13 @@ void K1UartComponent::handle_a4_(const uint8_t *frame, size_t len) {
   }
 }
 
+// ---------------- Apply arm-select overlay target ----------------
 void K1UartComponent::apply_arm_select_mode_(const std::string &mode_name) {
   if (!arm_strip_) return;
   arm_strip_->set_arm_select_mode_by_name(mode_name.c_str());
 }
 
-// Script exec
+// ---------------- Script execution ----------------
 void K1UartComponent::exec_script_(AlarmScript *script,
                                    const std::string &pin,
                                    bool force_flag,
@@ -304,7 +312,7 @@ void K1UartComponent::exec_script_(AlarmScript *script,
            (unsigned) pin.size(), (int)force_flag, (int)skip_flag);
 }
 
-// Pinmode helpers
+// ---------------- Pinmode helpers ----------------
 void K1UartComponent::enter_pinmode_() {
   if (pinmode_active_) return;
   pinmode_active_ = true;
@@ -313,7 +321,6 @@ void K1UartComponent::enter_pinmode_() {
 }
 
 void K1UartComponent::update_pinmode_timeout_(uint64_t now_us) {
-  // Called on each A1 frame
   if (!pinmode_active_) enter_pinmode_();
   pinmode_last_activity_us_ = now_us;
 }
@@ -329,7 +336,7 @@ void K1UartComponent::check_pinmode_expiry_(uint64_t now_us) {
   }
 }
 
-// Logging
+// ---------------- Logging ----------------
 void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
   char hex_part[64];
   size_t hpos = 0;
