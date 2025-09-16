@@ -20,7 +20,10 @@ namespace buzzer { class BuzzerComponent; }
 namespace k1_uart {
 
 #ifdef USE_ESP32
+// Alarm scripts: (pin, force, skip)
 using AlarmScript = script::Script<std::string, bool, bool>;
+// Custom action script: (prefix, pin)
+using CustomActionScript = script::Script<std::string, std::string>;
 #endif
 
 class K1UartComponent : public Component {
@@ -33,12 +36,15 @@ class K1UartComponent : public Component {
   void set_buzzer(esphome::buzzer::BuzzerComponent *b) { buzzer_ = b; }
 
 #ifdef USE_ESP32
+  // Alarm script setters
   void set_away_script(AlarmScript *s) { away_script_ = s; }
   void set_home_script(AlarmScript *s) { home_script_ = s; }
   void set_disarm_script(AlarmScript *s) { disarm_script_ = s; }
   void set_night_script(AlarmScript *s) { night_script_ = s; }
   void set_vacation_script(AlarmScript *s) { vacation_script_ = s; }
   void set_bypass_script(AlarmScript *s) { bypass_script_ = s; }
+  // Custom action
+  void set_custom_action_script(CustomActionScript *s) { custom_action_script_ = s; }
 
   void set_mode_selector(select::Select *sel) { mode_selector_ = sel; }
   void set_arm_strip(argb_strip::ARGBStripComponent *s) { arm_strip_ = s; }
@@ -50,6 +56,7 @@ class K1UartComponent : public Component {
 
  protected:
 #ifdef USE_ESP32
+  // UART constants
   static constexpr uart_port_t UART_PORT = UART_NUM_1;
   static constexpr int RX_BUF_SIZE = 1024;
   static constexpr int TX_BUF_SIZE = 0;
@@ -59,6 +66,7 @@ class K1UartComponent : public Component {
   static constexpr int PIN_RX = 32;
   static constexpr int READ_CHUNK = 128;
 
+  // Frame specs
   static constexpr uint8_t ID_A0 = 0xA0;
   static constexpr uint8_t ID_A1 = 0xA1;
   static constexpr uint8_t ID_A3 = 0xA3;
@@ -68,39 +76,48 @@ class K1UartComponent : public Component {
   static constexpr size_t LEN_A3 = 2;
   static constexpr size_t LEN_A4 = 2;
 
+  // Ring buffer
   static constexpr size_t RING_CAP = 256;
   std::array<uint8_t, RING_CAP> ring_{};
   size_t ring_head_{0};
   size_t ring_tail_{0};
   bool ring_full_{false};
 
+  // Buffer helpers
   void push_byte_(uint8_t b);
   bool available_() const;
   size_t size_() const;
   uint8_t peek_(size_t offset = 0) const;
   void pop_(size_t n);
 
+  // Parsing
   void parse_frames_();
   void handle_a0_(const uint8_t *frame, size_t len);
   void handle_a3_(const uint8_t *frame, size_t len);
   void handle_a4_(const uint8_t *frame, size_t len);
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
 
+  // Mapping
   std::string map_digit_(uint8_t code) const;
   const char *map_arm_select_(uint8_t code) const;
-  std::string map_dynamic_selector_option_() const;
+  std::string map_dynamic_selector_option_() const; // returns night/vacation/bypass/action or ""
 
-  void exec_script_(AlarmScript *script,
-                    const std::string &pin,
-                    bool force_flag,
-                    bool skip_flag);
-  void handle_dynamic_mode_scripts_(const std::string &pin,
-                                    bool force_flag,
-                                    bool skip_flag);
+  // Script dispatch
+  void exec_alarm_script_(AlarmScript *script,
+                          const std::string &pin,
+                          bool force_flag,
+                          bool skip_flag);
+  void dispatch_dynamic_alarm_(const std::string &prefix,
+                               const std::string &pin,
+                               bool force_flag,
+                               bool skip_flag);
+  void exec_custom_action_(const std::string &prefix,
+                           const std::string &pin);
 
+  // Arm-select LED
   void apply_arm_select_mode_(const std::string &mode_name);
 
-  // Pinmode (temporary tone mute) management
+  // Pinmode management
   void enter_pinmode_();
   void update_pinmode_timeout_(uint64_t now_us);
   void check_pinmode_expiry_(uint64_t now_us);
@@ -109,13 +126,17 @@ class K1UartComponent : public Component {
   esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
 
 #ifdef USE_ESP32
+  // Alarm scripts
   AlarmScript *away_script_{nullptr};
   AlarmScript *home_script_{nullptr};
   AlarmScript *disarm_script_{nullptr};
   AlarmScript *night_script_{nullptr};
   AlarmScript *vacation_script_{nullptr};
   AlarmScript *bypass_script_{nullptr};
+  // Custom action
+  CustomActionScript *custom_action_script_{nullptr};
 
+  // Selector & strip
   select::Select *mode_selector_{nullptr};
   argb_strip::ARGBStripComponent *arm_strip_{nullptr};
 
@@ -125,6 +146,7 @@ class K1UartComponent : public Component {
   uint32_t pinmode_timeout_ms_{2000};
 #endif
 
+  // Prefix rules
   std::string force_prefix_{"999"};
   std::string skip_delay_prefix_{"998"};
 };
