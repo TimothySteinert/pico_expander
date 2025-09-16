@@ -29,6 +29,7 @@ CONF_ARM_STRIP_ID = "arm_strip_id"
 
 CONF_FORCE_PREFIX = "force_prefix"
 CONF_SKIP_DELAY_PREFIX = "skip_delay_prefix"
+CONF_PINMODE_TIMEOUT_MS = "pinmode_timeout_ms"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -47,6 +48,7 @@ CONFIG_SCHEMA = cv.Schema(
 
         cv.Optional(CONF_FORCE_PREFIX, default="999"): cv.string,
         cv.Optional(CONF_SKIP_DELAY_PREFIX, default="998"): cv.string,
+        cv.Optional(CONF_PINMODE_TIMEOUT_MS, default=2000): cv.int_range(min=200, max=10000),
     }
 )
 
@@ -57,7 +59,6 @@ async def to_code(config):
         buz = await cg.get_variable(config[CONF_BUZZER_ID])
         cg.add(var.set_buzzer(buz))
 
-    # Scripts
     if CONF_AWAY_SCRIPT_ID in config:
         sc = await cg.get_variable(config[CONF_AWAY_SCRIPT_ID])
         cg.add(var.set_away_script(sc))
@@ -77,17 +78,16 @@ async def to_code(config):
         sc = await cg.get_variable(config[CONF_BYPASS_SCRIPT_ID])
         cg.add(var.set_bypass_script(sc))
 
-    # Selector
     if CONF_MODE_SELECTOR_ID in config:
         sel = await cg.get_variable(config[CONF_MODE_SELECTOR_ID])
         cg.add(var.set_mode_selector(sel))
 
-    # Arm strip
     if CONF_ARM_STRIP_ID in config:
         strip = await cg.get_variable(config[CONF_ARM_STRIP_ID])
         cg.add(var.set_arm_strip(strip))
 
     cg.add(var.set_force_prefix(config[CONF_FORCE_PREFIX]))
     cg.add(var.set_skip_delay_prefix(config[CONF_SKIP_DELAY_PREFIX]))
+    cg.add(var.set_pinmode_timeout_ms(config[CONF_PINMODE_TIMEOUT_MS]))
 
     await cg.register_component(var, config)
