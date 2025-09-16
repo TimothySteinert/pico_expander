@@ -6,6 +6,7 @@
 #include "driver/uart.h"
 #include "esphome/components/script/script.h"
 #include "esphome/components/select/select.h"
+#include "esphome/components/argb_strip/argb_strip.h"
 #endif
 
 #include <array>
@@ -32,6 +33,7 @@ class K1UartComponent : public Component {
   void set_buzzer(esphome::buzzer::BuzzerComponent *b) { buzzer_ = b; }
 
 #ifdef USE_ESP32
+  // Script setters
   void set_away_script(AlarmScript *s) { away_script_ = s; }
   void set_home_script(AlarmScript *s) { home_script_ = s; }
   void set_disarm_script(AlarmScript *s) { disarm_script_ = s; }
@@ -40,6 +42,7 @@ class K1UartComponent : public Component {
   void set_bypass_script(AlarmScript *s) { bypass_script_ = s; }
 
   void set_mode_selector(select::Select *sel) { mode_selector_ = sel; }
+  void set_arm_strip(argb_strip::ARGBStripComponent *s) { arm_strip_ = s; }
 #endif
 
   void set_force_prefix(const std::string &v) { force_prefix_ = v; }
@@ -60,8 +63,10 @@ class K1UartComponent : public Component {
   // Frame specs
   static constexpr uint8_t ID_A0 = 0xA0;
   static constexpr uint8_t ID_A1 = 0xA1;
+  static constexpr uint8_t ID_A3 = 0xA3;
   static constexpr size_t LEN_A0 = 21;
   static constexpr size_t LEN_A1 = 2;
+  static constexpr size_t LEN_A3 = 2;
 
   // Ring buffer
   static constexpr size_t RING_CAP = 256;
@@ -79,23 +84,31 @@ class K1UartComponent : public Component {
 
   void parse_frames_();
   void handle_a0_(const uint8_t *frame, size_t len);
+  void handle_a3_(const uint8_t *frame, size_t len);
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
 
+  // Mapping
   std::string map_digit_(uint8_t code) const;
-  const char *map_arm_select_(uint8_t code) const;  // returns away/home/disarm/dynamic/unknown
+  const char *map_arm_select_(uint8_t code) const;   // for A0 (away/home/disarm/dynamic/unknown)
+  std::string map_dynamic_selector_option_() const;  // returns night/vacation/bypass or empty
 
+  // Script helpers
   void exec_script_(AlarmScript *script,
                     const std::string &pin,
                     bool force_flag,
                     bool skip_flag);
-  void handle_dynamic_mode_(const std::string &pin,
-                            bool force_flag,
-                            bool skip_flag);
+  void handle_dynamic_mode_scripts_(const std::string &pin,
+                                    bool force_flag,
+                                    bool skip_flag);
+
+  // A3 arm-select (LED) logic
+  void apply_arm_select_mode_(const std::string &mode_name);
 #endif
 
   esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
 
 #ifdef USE_ESP32
+  // Scripts
   AlarmScript *away_script_{nullptr};
   AlarmScript *home_script_{nullptr};
   AlarmScript *disarm_script_{nullptr};
@@ -103,9 +116,12 @@ class K1UartComponent : public Component {
   AlarmScript *vacation_script_{nullptr};
   AlarmScript *bypass_script_{nullptr};
 
-  select::Select *mode_selector_{nullptr};  // Night / Vacation / Custom Bypass
+  // Selector & strip
+  select::Select *mode_selector_{nullptr};
+  argb_strip::ARGBStripComponent *arm_strip_{nullptr};
 #endif
 
+  // Prefix rules
   std::string force_prefix_{"999"};
   std::string skip_delay_prefix_{"998"};
 };
