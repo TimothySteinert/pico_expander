@@ -7,6 +7,7 @@
 #include "esphome/components/script/script.h"
 #include "esphome/components/select/select.h"
 #include "esphome/components/argb_strip/argb_strip.h"
+#include "esp_timer.h"
 #endif
 
 #include <array>
@@ -19,7 +20,6 @@ namespace buzzer { class BuzzerComponent; }
 namespace k1_uart {
 
 #ifdef USE_ESP32
-// Script signature: (pin, force, skip_delay)
 using AlarmScript = script::Script<std::string, bool, bool>;
 #endif
 
@@ -33,7 +33,6 @@ class K1UartComponent : public Component {
   void set_buzzer(esphome::buzzer::BuzzerComponent *b) { buzzer_ = b; }
 
 #ifdef USE_ESP32
-  // Script setters
   void set_away_script(AlarmScript *s) { away_script_ = s; }
   void set_home_script(AlarmScript *s) { home_script_ = s; }
   void set_disarm_script(AlarmScript *s) { disarm_script_ = s; }
@@ -47,10 +46,10 @@ class K1UartComponent : public Component {
 
   void set_force_prefix(const std::string &v) { force_prefix_ = v; }
   void set_skip_delay_prefix(const std::string &v) { skip_delay_prefix_ = v; }
+  void set_pinmode_timeout_ms(uint32_t v) { pinmode_timeout_ms_ = v; }
 
  protected:
 #ifdef USE_ESP32
-  // UART constants
   static constexpr uart_port_t UART_PORT = UART_NUM_1;
   static constexpr int RX_BUF_SIZE = 1024;
   static constexpr int TX_BUF_SIZE = 0;
@@ -60,24 +59,21 @@ class K1UartComponent : public Component {
   static constexpr int PIN_RX = 32;
   static constexpr int READ_CHUNK = 128;
 
-  // Frame specs
   static constexpr uint8_t ID_A0 = 0xA0;
   static constexpr uint8_t ID_A1 = 0xA1;
   static constexpr uint8_t ID_A3 = 0xA3;
-  static constexpr uint8_t ID_A4 = 0xA4;   // NEW: Strip mode (RFID enable/disable)
+  static constexpr uint8_t ID_A4 = 0xA4;
   static constexpr size_t LEN_A0 = 21;
   static constexpr size_t LEN_A1 = 2;
   static constexpr size_t LEN_A3 = 2;
   static constexpr size_t LEN_A4 = 2;
 
-  // Ring buffer
   static constexpr size_t RING_CAP = 256;
   std::array<uint8_t, RING_CAP> ring_{};
   size_t ring_head_{0};
   size_t ring_tail_{0};
   bool ring_full_{false};
 
-  // Helpers
   void push_byte_(uint8_t b);
   bool available_() const;
   size_t size_() const;
@@ -87,15 +83,13 @@ class K1UartComponent : public Component {
   void parse_frames_();
   void handle_a0_(const uint8_t *frame, size_t len);
   void handle_a3_(const uint8_t *frame, size_t len);
-  void handle_a4_(const uint8_t *frame, size_t len);  // NEW
+  void handle_a4_(const uint8_t *frame, size_t len);
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
 
-  // Mapping
   std::string map_digit_(uint8_t code) const;
-  const char *map_arm_select_(uint8_t code) const;   // for A0 (away/home/disarm/dynamic/unknown)
-  std::string map_dynamic_selector_option_() const;  // returns night/vacation/bypass or empty
+  const char *map_arm_select_(uint8_t code) const;
+  std::string map_dynamic_selector_option_() const;
 
-  // Script helpers
   void exec_script_(AlarmScript *script,
                     const std::string &pin,
                     bool force_flag,
@@ -104,14 +98,17 @@ class K1UartComponent : public Component {
                                     bool force_flag,
                                     bool skip_flag);
 
-  // A3 arm-select (LED) logic
   void apply_arm_select_mode_(const std::string &mode_name);
+
+  // Pinmode (temporary tone mute) management
+  void enter_pinmode_();
+  void update_pinmode_timeout_(uint64_t now_us);
+  void check_pinmode_expiry_(uint64_t now_us);
 #endif
 
   esphome::buzzer::BuzzerComponent *buzzer_{nullptr};
 
 #ifdef USE_ESP32
-  // Scripts
   AlarmScript *away_script_{nullptr};
   AlarmScript *home_script_{nullptr};
   AlarmScript *disarm_script_{nullptr};
@@ -119,12 +116,15 @@ class K1UartComponent : public Component {
   AlarmScript *vacation_script_{nullptr};
   AlarmScript *bypass_script_{nullptr};
 
-  // Selector & strip
   select::Select *mode_selector_{nullptr};
   argb_strip::ARGBStripComponent *arm_strip_{nullptr};
+
+  // Pinmode state
+  bool pinmode_active_{false};
+  uint64_t pinmode_last_activity_us_{0};
+  uint32_t pinmode_timeout_ms_{2000};
 #endif
 
-  // Prefix rules
   std::string force_prefix_{"999"};
   std::string skip_delay_prefix_{"998"};
 };
