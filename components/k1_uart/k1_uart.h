@@ -64,9 +64,11 @@ class K1UartComponent : public Component {
   static constexpr uint8_t ID_A0 = 0xA0;
   static constexpr uint8_t ID_A1 = 0xA1;
   static constexpr uint8_t ID_A3 = 0xA3;
+  static constexpr uint8_t ID_A4 = 0xA4;   // NEW: Strip mode (RFID enable/disable)
   static constexpr size_t LEN_A0 = 21;
   static constexpr size_t LEN_A1 = 2;
   static constexpr size_t LEN_A3 = 2;
+  static constexpr size_t LEN_A4 = 2;
 
   // Ring buffer
   static constexpr size_t RING_CAP = 256;
@@ -85,6 +87,7 @@ class K1UartComponent : public Component {
   void parse_frames_();
   void handle_a0_(const uint8_t *frame, size_t len);
   void handle_a3_(const uint8_t *frame, size_t len);
+  void handle_a4_(const uint8_t *frame, size_t len);  // NEW
   void log_frame_(const uint8_t *data, size_t len, uint8_t id);
 
   // Mapping
