@@ -9,7 +9,11 @@ buzzer_ns = cg.esphome_ns.namespace("buzzer")
 BuzzerComponent = buzzer_ns.class_("BuzzerComponent", cg.Component)
 
 script_ns = cg.esphome_ns.namespace("script")
-Script3 = script_ns.class_("Script", cg.Component)  # (pin, force, skip_delay)
+# Two different script signatures:
+#   Alarm scripts: (pin, force, skip_delay) -> Script<std::string,bool,bool>
+#   Custom action: (prefix, pin)             -> Script<std::string,std::string>
+AlarmScript = script_ns.class_("Script", cg.Component)
+CustomActionScript = script_ns.class_("Script", cg.Component)
 
 select_ns = cg.esphome_ns.namespace("select")
 SelectComponent = select_ns.class_("Select", cg.Component)
@@ -24,6 +28,8 @@ CONF_DISARM_SCRIPT_ID = "disarm_script_id"
 CONF_NIGHT_SCRIPT_ID = "night_script_id"
 CONF_VACATION_SCRIPT_ID = "vacation_script_id"
 CONF_BYPASS_SCRIPT_ID = "bypass_script_id"
+CONF_CUSTOM_ACTION_SCRIPT_ID = "custom_action_script_id"
+
 CONF_MODE_SELECTOR_ID = "mode_selector_id"
 CONF_ARM_STRIP_ID = "arm_strip_id"
 
@@ -36,12 +42,14 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(K1UartComponent),
         cv.Optional(CONF_BUZZER_ID): cv.use_id(BuzzerComponent),
 
-        cv.Optional(CONF_AWAY_SCRIPT_ID): cv.use_id(Script3),
-        cv.Optional(CONF_HOME_SCRIPT_ID): cv.use_id(Script3),
-        cv.Optional(CONF_DISARM_SCRIPT_ID): cv.use_id(Script3),
-        cv.Optional(CONF_NIGHT_SCRIPT_ID): cv.use_id(Script3),
-        cv.Optional(CONF_VACATION_SCRIPT_ID): cv.use_id(Script3),
-        cv.Optional(CONF_BYPASS_SCRIPT_ID): cv.use_id(Script3),
+        cv.Optional(CONF_AWAY_SCRIPT_ID): cv.use_id(AlarmScript),
+        cv.Optional(CONF_HOME_SCRIPT_ID): cv.use_id(AlarmScript),
+        cv.Optional(CONF_DISARM_SCRIPT_ID): cv.use_id(AlarmScript),
+        cv.Optional(CONF_NIGHT_SCRIPT_ID): cv.use_id(AlarmScript),
+        cv.Optional(CONF_VACATION_SCRIPT_ID): cv.use_id(AlarmScript),
+        cv.Optional(CONF_BYPASS_SCRIPT_ID): cv.use_id(AlarmScript),
+
+        cv.Optional(CONF_CUSTOM_ACTION_SCRIPT_ID): cv.use_id(CustomActionScript),
 
         cv.Optional(CONF_MODE_SELECTOR_ID): cv.use_id(SelectComponent),
         cv.Optional(CONF_ARM_STRIP_ID): cv.use_id(ARGBStripComponent),
@@ -59,24 +67,23 @@ async def to_code(config):
         buz = await cg.get_variable(config[CONF_BUZZER_ID])
         cg.add(var.set_buzzer(buz))
 
-    if CONF_AWAY_SCRIPT_ID in config:
-        sc = await cg.get_variable(config[CONF_AWAY_SCRIPT_ID])
-        cg.add(var.set_away_script(sc))
-    if CONF_HOME_SCRIPT_ID in config:
-        sc = await cg.get_variable(config[CONF_HOME_SCRIPT_ID])
-        cg.add(var.set_home_script(sc))
-    if CONF_DISARM_SCRIPT_ID in config:
-        sc = await cg.get_variable(config[CONF_DISARM_SCRIPT_ID])
-        cg.add(var.set_disarm_script(sc))
-    if CONF_NIGHT_SCRIPT_ID in config:
-        sc = await cg.get_variable(config[CONF_NIGHT_SCRIPT_ID])
-        cg.add(var.set_night_script(sc))
-    if CONF_VACATION_SCRIPT_ID in config:
-        sc = await cg.get_variable(config[CONF_VACATION_SCRIPT_ID])
-        cg.add(var.set_vacation_script(sc))
-    if CONF_BYPASS_SCRIPT_ID in config:
-        sc = await cg.get_variable(config[CONF_BYPASS_SCRIPT_ID])
-        cg.add(var.set_bypass_script(sc))
+    # Alarm scripts
+    for key, setter in [
+        (CONF_AWAY_SCRIPT_ID, "set_away_script"),
+        (CONF_HOME_SCRIPT_ID, "set_home_script"),
+        (CONF_DISARM_SCRIPT_ID, "set_disarm_script"),
+        (CONF_NIGHT_SCRIPT_ID, "set_night_script"),
+        (CONF_VACATION_SCRIPT_ID, "set_vacation_script"),
+        (CONF_BYPASS_SCRIPT_ID, "set_bypass_script"),
+    ]:
+        if key in config:
+            sc = await cg.get_variable(config[key])
+            cg.add(getattr(var, setter)(sc))
+
+    # Custom action script
+    if CONF_CUSTOM_ACTION_SCRIPT_ID in config:
+        sc = await cg.get_variable(config[CONF_CUSTOM_ACTION_SCRIPT_ID])
+        cg.add(var.set_custom_action_script(sc))
 
     if CONF_MODE_SELECTOR_ID in config:
         sel = await cg.get_variable(config[CONF_MODE_SELECTOR_ID])
