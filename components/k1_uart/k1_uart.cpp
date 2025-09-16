@@ -32,7 +32,7 @@ void K1UartComponent::setup() {
     return;
   }
   uart_flush_input(UART_PORT);
-  ESP_LOGI(TAG, "UART ready (A0=21, A1=2, A3=2, A4=2).");
+  ESP_LOGI(TAG, "UART ready (A0=21, A1=2, A3=2, A4=2). Pinmode timeout=%ums", pinmode_timeout_ms_);
 #endif
 }
 
@@ -44,6 +44,10 @@ void K1UartComponent::loop() {
     for (int i = 0; i < len; i++) push_byte_(buf[i]);
     parse_frames_();
   }
+
+  // Pinmode expiry check (use esp_timer_get_time)
+  uint64_t now_us = esp_timer_get_time();
+  check_pinmode_expiry_(now_us);
 #endif
 }
 
@@ -51,7 +55,7 @@ void K1UartComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "K1 UART:");
 #ifdef USE_ESP32
   ESP_LOGCONFIG(TAG, "  Port: UART1 TX=%d RX=%d Baud=%d", PIN_TX, PIN_RX, BAUD);
-  ESP_LOGCONFIG(TAG, "  Scripts (pin,force,skip): away=%s home=%s disarm=%s night=%s vacation=%s bypass=%s",
+  ESP_LOGCONFIG(TAG, "  Scripts: away=%s home=%s disarm=%s night=%s vacation=%s bypass=%s",
                 away_script_ ? "YES":"NO",
                 home_script_ ? "YES":"NO",
                 disarm_script_ ? "YES":"NO",
@@ -59,15 +63,17 @@ void K1UartComponent::dump_config() {
                 vacation_script_ ? "YES":"NO",
                 bypass_script_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  Dynamic selector: %s", mode_selector_ ? "YES":"NO");
-  ESP_LOGCONFIG(TAG, "  Arm strip / RFID control: %s", arm_strip_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Arm strip: %s", arm_strip_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  force_prefix='%s' skip_delay_prefix='%s'",
                 force_prefix_.c_str(), skip_delay_prefix_.c_str());
+  ESP_LOGCONFIG(TAG, "  Pinmode timeout: %ums (active=%s)",
+                pinmode_timeout_ms_, pinmode_active_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  Buzzer: %s", buzzer_ ? "YES":"NO");
 #endif
 }
 
 #ifdef USE_ESP32
-// -------- Ring buffer --------
+// Ring buffer
 void K1UartComponent::push_byte_(uint8_t b) {
   if (ring_full_) ring_tail_ = (ring_tail_ + 1) % RING_CAP;
   ring_[ring_head_] = b;
@@ -94,7 +100,7 @@ void K1UartComponent::pop_(size_t n) {
   }
 }
 
-// -------- Mapping (digits) --------
+// Mapping
 std::string K1UartComponent::map_digit_(uint8_t code) const {
   switch (code) {
     case 0x05: return "1";
@@ -119,7 +125,6 @@ const char *K1UartComponent::map_arm_select_(uint8_t code) const {
     default:   return "unknown";
   }
 }
-
 std::string K1UartComponent::map_dynamic_selector_option_() const {
   if (!mode_selector_) return {};
   std::string sel = mode_selector_->state;
@@ -133,7 +138,7 @@ std::string K1UartComponent::map_dynamic_selector_option_() const {
   return {};
 }
 
-// -------- Parser main --------
+// Parser
 void K1UartComponent::parse_frames_() {
   while (available_()) {
     uint8_t id = peek_();
@@ -141,7 +146,7 @@ void K1UartComponent::parse_frames_() {
     if (id == ID_A0) needed = LEN_A0;
     else if (id == ID_A1) needed = LEN_A1;
     else if (id == ID_A3) needed = LEN_A3;
-    else if (id == ID_A4) needed = LEN_A4;   // NEW
+    else if (id == ID_A4) needed = LEN_A4;
     else {
       ESP_LOGD(TAG, "UNK: %02X", id);
       pop_(1);
@@ -156,7 +161,11 @@ void K1UartComponent::parse_frames_() {
     pop_(needed);
 
     if (id == ID_A1) {
+      // Key beep
       if (buzzer_) buzzer_->key_beep();
+      // Pinmode handling
+      uint64_t now_us = esp_timer_get_time();
+      update_pinmode_timeout_(now_us);
     } else if (id == ID_A0) {
       handle_a0_(frame, needed);
     } else if (id == ID_A3) {
@@ -167,11 +176,10 @@ void K1UartComponent::parse_frames_() {
   }
 }
 
-// -------- A0 (scripts) --------
+// A0 handling (unchanged body except context)
 void K1UartComponent::handle_a0_(const uint8_t *frame, size_t len) {
   if (len != LEN_A0 || frame[0] != ID_A0) return;
 
-  // Prefix for flags
   std::string prefix;
   for (int i = 1; i <= 3; i++) {
     if (frame[i] != 0xFF) {
@@ -225,7 +233,7 @@ void K1UartComponent::handle_dynamic_mode_scripts_(const std::string &pin,
   else if (dyn == "bypass") target = bypass_script_;
 
   if (dyn.empty()) {
-    ESP_LOGW(TAG, "Dynamic (A0 0x44) selector state invalid / missing");
+    ESP_LOGW(TAG, "Dynamic (A0 0x44) selector invalid / missing");
     return;
   }
   if (!target) {
@@ -235,29 +243,20 @@ void K1UartComponent::handle_dynamic_mode_scripts_(const std::string &pin,
   exec_script_(target, pin, force_flag, skip_flag);
 }
 
-// -------- A3 (arm select LED control) --------
+// A3 (arm select)
 void K1UartComponent::handle_a3_(const uint8_t *frame, size_t len) {
   if (len != LEN_A3 || frame[0] != ID_A3) return;
   uint8_t code = frame[1];
 
   std::string final_mode;
-
-  if (code == 0xFF) {
-    final_mode = "none";
-  } else if (code == 0x41) {
-    final_mode = "away";
-  } else if (code == 0x42) {
-    final_mode = "home";
-  } else if (code == 0x43) {
-    final_mode = "disarm";
-  } else if (code == 0x44) {
+  if (code == 0xFF) final_mode = "none";
+  else if (code == 0x41) final_mode = "away";
+  else if (code == 0x42) final_mode = "home";
+  else if (code == 0x43) final_mode = "disarm";
+  else if (code == 0x44) {
     auto dyn = map_dynamic_selector_option_();
-    if (dyn.empty()) {
-      ESP_LOGW(TAG, "A3 dynamic 0x44 but selector invalid -> none");
-      final_mode = "none";
-    } else {
-      final_mode = dyn;
-    }
+    final_mode = dyn.empty() ? "none" : dyn;
+    if (dyn.empty()) ESP_LOGW(TAG, "A3 dynamic 0x44 but selector invalid -> none");
   } else {
     ESP_LOGW(TAG, "A3 unknown code 0x%02X -> none", code);
     final_mode = "none";
@@ -267,7 +266,7 @@ void K1UartComponent::handle_a3_(const uint8_t *frame, size_t len) {
   apply_arm_select_mode_(final_mode);
 }
 
-// -------- A4 (RFID strip mode control) --------
+// A4 (RFID mode)
 void K1UartComponent::handle_a4_(const uint8_t *frame, size_t len) {
   if (len != LEN_A4 || frame[0] != ID_A4) return;
   if (!arm_strip_) {
@@ -276,26 +275,22 @@ void K1UartComponent::handle_a4_(const uint8_t *frame, size_t len) {
   }
   uint8_t code = frame[1];
   if (code == 0x20) {
-    ESP_LOGD(TAG, "A4: Set strip NORMAL (disable RFID)");
+    ESP_LOGD(TAG, "A4: strip NORMAL (disable RFID)");
     arm_strip_->disable_rfid_mode();
   } else if (code == 0x30) {
-    ESP_LOGD(TAG, "A4: Set strip RFID (enable RFID)");
+    ESP_LOGD(TAG, "A4: strip RFID (enable RFID)");
     arm_strip_->enable_rfid_mode();
   } else {
     ESP_LOGW(TAG, "A4 unknown code 0x%02X (expected 0x20/0x30)", code);
   }
 }
 
-// -------- Apply arm-select LED mode --------
 void K1UartComponent::apply_arm_select_mode_(const std::string &mode_name) {
-  if (!arm_strip_) {
-    ESP_LOGV(TAG, "Arm strip not configured; ignoring arm-select mode set");
-    return;
-  }
+  if (!arm_strip_) return;
   arm_strip_->set_arm_select_mode_by_name(mode_name.c_str());
 }
 
-// -------- Script exec --------
+// Script exec
 void K1UartComponent::exec_script_(AlarmScript *script,
                                    const std::string &pin,
                                    bool force_flag,
@@ -309,7 +304,32 @@ void K1UartComponent::exec_script_(AlarmScript *script,
            (unsigned) pin.size(), (int)force_flag, (int)skip_flag);
 }
 
-// -------- Logging --------
+// Pinmode helpers
+void K1UartComponent::enter_pinmode_() {
+  if (pinmode_active_) return;
+  pinmode_active_ = true;
+  if (buzzer_) buzzer_->pinmode_mute();
+  ESP_LOGV(TAG, "Pinmode entered");
+}
+
+void K1UartComponent::update_pinmode_timeout_(uint64_t now_us) {
+  // Called on each A1 frame
+  if (!pinmode_active_) enter_pinmode_();
+  pinmode_last_activity_us_ = now_us;
+}
+
+void K1UartComponent::check_pinmode_expiry_(uint64_t now_us) {
+  if (!pinmode_active_) return;
+  uint64_t elapsed_us = now_us - pinmode_last_activity_us_;
+  uint64_t limit_us = (uint64_t) pinmode_timeout_ms_ * 1000ULL;
+  if (elapsed_us >= limit_us) {
+    pinmode_active_ = false;
+    if (buzzer_) buzzer_->pinmode_unmute();
+    ESP_LOGV(TAG, "Pinmode exited (timeout %ums)", pinmode_timeout_ms_);
+  }
+}
+
+// Logging
 void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
   char hex_part[64];
   size_t hpos = 0;
