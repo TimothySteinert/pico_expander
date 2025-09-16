@@ -51,10 +51,14 @@ void K1UartComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "K1 UART:");
 #ifdef USE_ESP32
   ESP_LOGCONFIG(TAG, "  Port: UART1 TX=%d RX=%d Baud=%d", PIN_TX, PIN_RX, BAUD);
-  ESP_LOGCONFIG(TAG, "  Scripts (pin,force,skip): away=%s home=%s disarm=%s",
+  ESP_LOGCONFIG(TAG, "  Scripts (pin,force,skip): away=%s home=%s disarm=%s night=%s vacation=%s bypass=%s",
                 away_script_ ? "YES":"NO",
                 home_script_ ? "YES":"NO",
-                disarm_script_ ? "YES":"NO");
+                disarm_script_ ? "YES":"NO",
+                night_script_ ? "YES":"NO",
+                vacation_script_ ? "YES":"NO",
+                bypass_script_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Dynamic 0x44 selector: %s", mode_selector_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  force_prefix='%s' skip_delay_prefix='%s'",
                 force_prefix_.c_str(), skip_delay_prefix_.c_str());
   ESP_LOGCONFIG(TAG, "  Buzzer: %s", buzzer_ ? "YES":"NO");
@@ -110,7 +114,7 @@ const char *K1UartComponent::map_arm_select_(uint8_t code) const {
     case 0x41: return "away";
     case 0x42: return "home";
     case 0x43: return "disarm";
-    case 0x44: return "disarm";
+    case 0x44: return "dynamic";   // selector-based
     default:   return "unknown";
   }
 }
@@ -147,7 +151,7 @@ void K1UartComponent::parse_frames_() {
 void K1UartComponent::handle_a0_(const uint8_t *frame, size_t len) {
   if (len != LEN_A0 || frame[0] != ID_A0) return;
 
-  // Prefix bytes (for flags only)
+  // Prefix (flags only)
   std::string prefix;
   for (int i = 1; i <= 3; i++) {
     if (frame[i] != 0xFF) {
@@ -177,15 +181,52 @@ void K1UartComponent::handle_a0_(const uint8_t *frame, size_t len) {
   ESP_LOGD(TAG, "A0 parsed: mode=%s prefix='%s' pin='%s' force=%d skip=%d",
            mode, prefix.c_str(), pin.c_str(), (int)force_flag, (int)skip_flag);
 
-  if (std::string(mode) == "disarm") {
+  std::string m = mode;
+  if (m == "disarm") {
     exec_script_(disarm_script_, pin, force_flag, skip_flag);
-  } else if (std::string(mode) == "away") {
+  } else if (m == "away") {
     exec_script_(away_script_, pin, force_flag, skip_flag);
-  } else if (std::string(mode) == "home") {
+  } else if (m == "home") {
     exec_script_(home_script_, pin, force_flag, skip_flag);
+  } else if (m == "dynamic") {
+    handle_dynamic_mode_(pin, force_flag, skip_flag);
   } else {
     ESP_LOGW(TAG, "Unhandled mode %s", mode);
   }
+}
+
+void K1UartComponent::handle_dynamic_mode_(const std::string &pin,
+                                           bool force_flag,
+                                           bool skip_flag) {
+  if (!mode_selector_) {
+    ESP_LOGW(TAG, "Dynamic (0x44) received but no mode selector configured");
+    return;
+  }
+  std::string sel = mode_selector_->state;
+  std::string sel_lc;
+  sel_lc.resize(sel.size());
+  std::transform(sel.begin(), sel.end(), sel_lc.begin(),
+                 [](unsigned char c){ return (char)std::tolower(c); });
+
+  AlarmScript *target = nullptr;
+  if (sel_lc == "night") {
+    target = night_script_;
+  } else if (sel_lc == "vacation") {
+    target = vacation_script_;
+  } else if (sel_lc == "custom bypass" || sel_lc == "bypass" || sel_lc == "custom_bypass") {
+    target = bypass_script_;
+  } else {
+    ESP_LOGW(TAG, "Dynamic selector option '%s' not recognized (expected Night/Vacation/Custom Bypass)", sel.c_str());
+    return;
+  }
+
+  if (!target) {
+    ESP_LOGW(TAG, "No script configured for dynamic option '%s'", sel.c_str());
+    return;
+  }
+
+  ESP_LOGD(TAG, "Dynamic 0x44 mapped to '%s'", sel.c_str());
+  exec_script_(target, pin, force_flag, skip_flag);
 }
 
 void K1UartComponent::exec_script_(AlarmScript *script,
@@ -196,7 +237,6 @@ void K1UartComponent::exec_script_(AlarmScript *script,
     ESP_LOGW(TAG, "Script not configured for this mode");
     return;
   }
-  // Order: pin, force, skip_delay
   script->execute(pin, force_flag, skip_flag);
   ESP_LOGI(TAG, "Script executed (pin_len=%u force=%d skip=%d)",
            (unsigned)pin.size(), (int)force_flag, (int)skip_flag);
