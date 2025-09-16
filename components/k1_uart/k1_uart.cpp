@@ -32,7 +32,7 @@ void K1UartComponent::setup() {
     return;
   }
   uart_flush_input(UART_PORT);
-  ESP_LOGI(TAG, "UART ready (A0=21, A1=2).");
+  ESP_LOGI(TAG, "UART ready (A0=21, A1=2, A3=2).");
 #endif
 }
 
@@ -58,7 +58,8 @@ void K1UartComponent::dump_config() {
                 night_script_ ? "YES":"NO",
                 vacation_script_ ? "YES":"NO",
                 bypass_script_ ? "YES":"NO");
-  ESP_LOGCONFIG(TAG, "  Dynamic 0x44 selector: %s", mode_selector_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Dynamic selector: %s", mode_selector_ ? "YES":"NO");
+  ESP_LOGCONFIG(TAG, "  Arm strip: %s", arm_strip_ ? "YES":"NO");
   ESP_LOGCONFIG(TAG, "  force_prefix='%s' skip_delay_prefix='%s'",
                 force_prefix_.c_str(), skip_delay_prefix_.c_str());
   ESP_LOGCONFIG(TAG, "  Buzzer: %s", buzzer_ ? "YES":"NO");
@@ -66,7 +67,7 @@ void K1UartComponent::dump_config() {
 }
 
 #ifdef USE_ESP32
-// Ring buffer
+// -------- Ring buffer --------
 void K1UartComponent::push_byte_(uint8_t b) {
   if (ring_full_) ring_tail_ = (ring_tail_ + 1) % RING_CAP;
   ring_[ring_head_] = b;
@@ -93,7 +94,7 @@ void K1UartComponent::pop_(size_t n) {
   }
 }
 
-// Mapping
+// -------- Mapping (digits) --------
 std::string K1UartComponent::map_digit_(uint8_t code) const {
   switch (code) {
     case 0x05: return "1";
@@ -114,18 +115,32 @@ const char *K1UartComponent::map_arm_select_(uint8_t code) const {
     case 0x41: return "away";
     case 0x42: return "home";
     case 0x43: return "disarm";
-    case 0x44: return "dynamic";   // selector-based
+    case 0x44: return "dynamic";
     default:   return "unknown";
   }
 }
 
-// Parser loop
+std::string K1UartComponent::map_dynamic_selector_option_() const {
+  if (!mode_selector_) return {};
+  std::string sel = mode_selector_->state;
+  std::string lc;
+  lc.resize(sel.size());
+  std::transform(sel.begin(), sel.end(), lc.begin(),
+                 [](unsigned char c){ return (char) std::tolower(c); });
+  if (lc == "night") return "night";
+  if (lc == "vacation") return "vacation";
+  if (lc == "custom bypass" || lc == "bypass" || lc == "custom_bypass") return "bypass";
+  return {};
+}
+
+// -------- Parser main --------
 void K1UartComponent::parse_frames_() {
   while (available_()) {
     uint8_t id = peek_();
     size_t needed = 0;
     if (id == ID_A0) needed = LEN_A0;
     else if (id == ID_A1) needed = LEN_A1;
+    else if (id == ID_A3) needed = LEN_A3;
     else {
       ESP_LOGD(TAG, "UNK: %02X", id);
       pop_(1);
@@ -143,15 +158,17 @@ void K1UartComponent::parse_frames_() {
       if (buzzer_) buzzer_->key_beep();
     } else if (id == ID_A0) {
       handle_a0_(frame, needed);
+    } else if (id == ID_A3) {
+      handle_a3_(frame, needed);
     }
   }
 }
 
-// Handle A0 frame
+// -------- A0 (scripts) --------
 void K1UartComponent::handle_a0_(const uint8_t *frame, size_t len) {
   if (len != LEN_A0 || frame[0] != ID_A0) return;
 
-  // Prefix (flags only)
+  // Prefix for flags
   std::string prefix;
   for (int i = 1; i <= 3; i++) {
     if (frame[i] != 0xFF) {
@@ -189,46 +206,73 @@ void K1UartComponent::handle_a0_(const uint8_t *frame, size_t len) {
   } else if (m == "home") {
     exec_script_(home_script_, pin, force_flag, skip_flag);
   } else if (m == "dynamic") {
-    handle_dynamic_mode_(pin, force_flag, skip_flag);
+    handle_dynamic_mode_scripts_(pin, force_flag, skip_flag);
   } else {
     ESP_LOGW(TAG, "Unhandled mode %s", mode);
   }
 }
 
-void K1UartComponent::handle_dynamic_mode_(const std::string &pin,
-                                           bool force_flag,
-                                           bool skip_flag) {
-  if (!mode_selector_) {
-    ESP_LOGW(TAG, "Dynamic (0x44) received but no mode selector configured");
-    return;
-  }
-  std::string sel = mode_selector_->state;
-  std::string sel_lc;
-  sel_lc.resize(sel.size());
-  std::transform(sel.begin(), sel.end(), sel_lc.begin(),
-                 [](unsigned char c){ return (char)std::tolower(c); });
-
+void K1UartComponent::handle_dynamic_mode_scripts_(const std::string &pin,
+                                                   bool force_flag,
+                                                   bool skip_flag) {
+  auto dyn = map_dynamic_selector_option_();
   AlarmScript *target = nullptr;
-  if (sel_lc == "night") {
-    target = night_script_;
-  } else if (sel_lc == "vacation") {
-    target = vacation_script_;
-  } else if (sel_lc == "custom bypass" || sel_lc == "bypass" || sel_lc == "custom_bypass") {
-    target = bypass_script_;
-  } else {
-    ESP_LOGW(TAG, "Dynamic selector option '%s' not recognized (expected Night/Vacation/Custom Bypass)", sel.c_str());
+  if (dyn == "night") target = night_script_;
+  else if (dyn == "vacation") target = vacation_script_;
+  else if (dyn == "bypass") target = bypass_script_;
+
+  if (dyn.empty()) {
+    ESP_LOGW(TAG, "Dynamic (A0 0x44) selector state invalid / missing");
     return;
   }
-
   if (!target) {
-    ESP_LOGW(TAG, "No script configured for dynamic option '%s'", sel.c_str());
+    ESP_LOGW(TAG, "No script configured for dynamic state '%s'", dyn.c_str());
     return;
   }
-
-  ESP_LOGD(TAG, "Dynamic 0x44 mapped to '%s'", sel.c_str());
   exec_script_(target, pin, force_flag, skip_flag);
 }
 
+// -------- A3 (arm select LED control) --------
+void K1UartComponent::handle_a3_(const uint8_t *frame, size_t len) {
+  if (len != LEN_A3 || frame[0] != ID_A3) return;
+  uint8_t code = frame[1];
+
+  std::string final_mode;
+
+  if (code == 0xFF) {
+    final_mode = "none";
+  } else if (code == 0x41) {
+    final_mode = "away";
+  } else if (code == 0x42) {
+    final_mode = "home";
+  } else if (code == 0x43) {
+    final_mode = "disarm";
+  } else if (code == 0x44) {
+    auto dyn = map_dynamic_selector_option_();
+    if (dyn.empty()) {
+      ESP_LOGW(TAG, "A3 dynamic 0x44 but selector invalid -> none");
+      final_mode = "none";
+    } else {
+      final_mode = dyn;
+    }
+  } else {
+    ESP_LOGW(TAG, "A3 unknown code 0x%02X -> none", code);
+    final_mode = "none";
+  }
+
+  ESP_LOGD(TAG, "A3 set arm-select mode -> %s", final_mode.c_str());
+  apply_arm_select_mode_(final_mode);
+}
+
+void K1UartComponent::apply_arm_select_mode_(const std::string &mode_name) {
+  if (!arm_strip_) {
+    ESP_LOGV(TAG, "Arm strip not configured; ignoring arm-select mode set");
+    return;
+  }
+  arm_strip_->set_arm_select_mode_by_name(mode_name.c_str());
+}
+
+// -------- Script exec --------
 void K1UartComponent::exec_script_(AlarmScript *script,
                                    const std::string &pin,
                                    bool force_flag,
@@ -239,12 +283,12 @@ void K1UartComponent::exec_script_(AlarmScript *script,
   }
   script->execute(pin, force_flag, skip_flag);
   ESP_LOGI(TAG, "Script executed (pin_len=%u force=%d skip=%d)",
-           (unsigned)pin.size(), (int)force_flag, (int)skip_flag);
+           (unsigned) pin.size(), (int)force_flag, (int)skip_flag);
 }
 
-// Logging
+// -------- Logging --------
 void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
-  char hex_part[80];
+  char hex_part[64];
   size_t hpos = 0;
   for (size_t i = 0; i < len; i++) {
     if (hpos + 4 >= sizeof(hex_part)) break;
@@ -257,6 +301,7 @@ void K1UartComponent::log_frame_(const uint8_t *data, size_t len, uint8_t id) {
 
   if (id == ID_A0) ESP_LOGD(TAG, "A0 (%u): %s", (unsigned)len, hex_part);
   else if (id == ID_A1) ESP_LOGD(TAG, "A1 (%u): %s", (unsigned)len, hex_part);
+  else if (id == ID_A3) ESP_LOGD(TAG, "A3 (%u): %s", (unsigned)len, hex_part);
   else ESP_LOGD(TAG, "ID %02X (%u): %s", id, (unsigned)len, hex_part);
 }
 #endif  // USE_ESP32
